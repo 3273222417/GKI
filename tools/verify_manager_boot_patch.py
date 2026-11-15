@@ -29,6 +29,7 @@ from prepare_manager_lkm import (LkmError, atomic_json, inspect_module, public_i
                                  read_json, selected_source)
 from snapshot_ksu_source import SnapshotError, git
 from manager_variants import manager_profile, selected_variant
+from sukisu_cargo_lock import reconcile_sukisu_cargo_lock
 
 
 HOST = "x86_64-unknown-linux-gnu"
@@ -413,6 +414,23 @@ def check_restored(data: bytes, *, configs: dict[str, Entry] | None = None) -> N
         raise VerificationError("Official boot-restore did not restore the original synthetic init and remove the module")
 
 
+def build_host_ksud(source: Path, native_source: Path) -> dict[str, str]:
+    environment = host_environment(source)
+    manifest = native_source / "userspace/ksud/Cargo.toml"
+    variant = selected_variant()
+    if variant == 'SukiSU':
+        try:
+            reconcile_sukisu_cargo_lock(native_source, HOST, environment=environment)
+        except (ValueError, subprocess.SubprocessError) as error:
+            raise VerificationError('Could not reconcile the SukiSU host lockfile: ' + str(error)) from None
+    cargo = ['cargo', '+nightly'] if variant == 'BakaSU' else ['cargo']
+    command([*cargo, "clean", "--manifest-path", str(manifest), "-p", "ksud", "--target", HOST, "--release"],
+            native_source, environment)
+    command([*cargo, "build", "--locked", "--target", HOST, "--release", "--manifest-path", str(manifest)],
+            native_source, environment, timeout=1800)
+    return environment
+
+
 def verify(source: Path, report_path: Path, reference: str, output: Path) -> dict:
     if sys.platform != "linux" or platform.machine().lower() not in {"x86_64", "amd64"}:
         raise VerificationError("Real native ksud verification requires an x86_64 Linux runner")
@@ -432,16 +450,10 @@ def verify(source: Path, report_path: Path, reference: str, output: Path) -> dic
     (output / "SYNTHETIC_TEST_ONLY_DO_NOT_FLASH.txt").write_text(FIXTURE_NOTICE, encoding="ascii")
     native_source = output / "native-source"
     host_patches = prepare_host_copy(source, native_source, provenance["ksu_ref"], modules, init)
-    manifest = native_source / "userspace/ksud/Cargo.toml"
     fixture = output / "synthetic-format-only-do-not-flash.img"
     fixture_bytes = boot_v4(synthetic_kernel(), newc({"init": Entry(stat.S_IFREG | 0o755, FIXTURE_INIT)}))
     fixture.write_bytes(fixture_bytes)
-    environment = host_environment(source)
-    cargo = ['cargo', '+nightly'] if selected_variant() == 'BakaSU' else ['cargo']
-    command([*cargo, "clean", "--manifest-path", str(manifest), "-p", "ksud", "--target", HOST, "--release"],
-            native_source, environment)
-    command([*cargo, "build", "--locked", "--target", HOST, "--release", "--manifest-path", str(manifest)],
-            native_source, environment, timeout=1800)
+    environment = build_host_ksud(source, native_source)
     ksud = target / HOST / "release/ksud"
     host_binary = regular_bytes(ksud, MAX_IMAGE)
     if (len(host_binary) < 64 or host_binary[:7] != b"\x7fELF\x02\x01\x01"

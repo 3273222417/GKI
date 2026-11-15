@@ -173,6 +173,60 @@ class ManagerBootPatchTests(unittest.TestCase):
         self.assertEqual(environment["ANDROID_NDK_HOME"], "/sdk/ndk")
         self.assertEqual(environment["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"], "keep-for-the-android-build")
 
+    def lock_checkouts(self, original):
+        root = ROOT / 'tests' / ('.manager-host-lock-' + uuid.uuid4().hex)
+        root.mkdir()
+        self.addCleanup(shutil.rmtree, root)
+        source, host = root / 'android', root / 'host'
+        for checkout in (source, host):
+            checkout.mkdir()
+            (checkout / 'Cargo.lock').write_bytes(original)
+        return source, host
+
+    def test_sukisu_reconciles_only_the_host_lock_before_locked_build(self):
+        normalized = b'version = 4\n[[package]]\nname = "ksud"\nversion = "1.0.0"\n'
+        original = normalized + b'[[package]]\nname = "unused"\nversion = "1.0.0"\n'
+        source, host = self.lock_checkouts(original)
+
+        def metadata(arguments, *, cwd, env, **kwargs):
+            self.assertEqual(host, cwd)
+            self.assertEqual(['cargo', 'metadata'], arguments[:2])
+            self.assertIn(boot.HOST, arguments)
+            self.assertEqual(str(source / 'target'), env['CARGO_TARGET_DIR'])
+            (cwd / 'Cargo.lock').write_bytes(normalized)
+
+        def command(arguments, checkout, environment, **kwargs):
+            self.assertEqual(host, checkout)
+            self.assertEqual(str(source / 'target'), environment['CARGO_TARGET_DIR'])
+            if 'build' in arguments:
+                self.assertIn('--locked', arguments)
+                self.assertEqual(normalized, (host / 'Cargo.lock').read_bytes())
+
+        with mock.patch.dict(os.environ, {'KSU_VARIANT': 'SukiSU'}), \
+                mock.patch.object(boot.subprocess, 'run', side_effect=metadata) as cargo, \
+                mock.patch.object(boot, 'command', side_effect=command) as run:
+            boot.build_host_ksud(source, host)
+
+        cargo.assert_called_once()
+        self.assertTrue(any('build' in call.args[0] for call in run.call_args_list))
+        self.assertEqual(original, (source / 'Cargo.lock').read_bytes())
+
+    def test_sukisu_does_not_build_with_a_rejected_host_lock(self):
+        original = b'version = 4\n[[package]]\nname = "ksud"\nversion = "1.0.0"\n'
+        source, host = self.lock_checkouts(original)
+        lock = host / 'Cargo.lock'
+
+        def metadata(*args, **kwargs):
+            lock.write_bytes(original.replace(b'1.0.0', b'1.0.1'))
+
+        with mock.patch.dict(os.environ, {'KSU_VARIANT': 'SukiSU'}), \
+                mock.patch.object(boot.subprocess, 'run', side_effect=metadata), \
+                mock.patch.object(boot, 'command') as run:
+            with self.assertRaisesRegex(boot.VerificationError, 'unpinned dependency'):
+                boot.build_host_ksud(source, host)
+            run.assert_not_called()
+        self.assertEqual(original, lock.read_bytes())
+
     def test_commands_cannot_flash_and_nonzero_status_is_failure(self):
         with mock.patch.object(boot.subprocess, "run") as run:
             with self.assertRaisesRegex(boot.VerificationError, "Flashing"):

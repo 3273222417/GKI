@@ -41,7 +41,7 @@ RECIPE_INPUTS = (
     'tools/patches/bakasu-kpm.patch', 'tools/prepare_additional_gradle.py',
     'tools/prepare_manager_icons.py', 'tools/prepare_manager_lkm.py',
     'tools/restore_bakasu_kpm.py', 'tools/reusable_manager_apk.py',
-    'tools/sign_sukisu_manager.py', 'tools/snapshot_ksu_source.py',
+    'tools/sign_sukisu_manager.py', 'tools/snapshot_ksu_source.py', 'tools/sukisu_cargo_lock.py',
     'tools/verify_manager_boot_patch.py',
 )
 RECIPE_PATTERNS = ('tools/patches/bakasu-kpm-base/*.source', 'tools/templates/*.kt')
