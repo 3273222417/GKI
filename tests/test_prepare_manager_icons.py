@@ -92,7 +92,7 @@ class ManagerIconsTests(unittest.TestCase):
     def test_build_and_manual_sync_use_the_same_preparation(self):
         build = (ROOT / 'tools/build_sukisu_manager.sh').read_text('utf-8')
         self.assertIn('python3 "$build_tools/prepare_manager_icons.py" --source "$source_dir"', build)
-        self.assertLess(build.index('prepare_manager_icons.py'), build.index('cargo build'))
+        self.assertLess(build.index('prepare_manager_icons.py'), build.index('build_manager_native.sh'))
         sync = (ROOT / 'tools/verify_manager_update.py').read_text('utf-8')
         self.assertIn('prepare_manager_icons(source)', sync)
 

@@ -8,24 +8,20 @@ import os
 from pathlib import Path
 import sys
 
-from check_official_updates import UpdateError, validate_snapshot, write_outputs
+from approved_manager_builds import ChannelSources, LATEST, STABLE, read_approved
+from check_official_updates import write_outputs
 from manager_lkm_jobs import load_ddk_matrix
-from manager_variants import MANAGERS, manager_profile
+from manager_variants import MANAGERS
 from prebuilt_manager_history import named_artifacts, verified_artifact
-from resolve_build_sources import (NoStableRelease, SHA, SourceResolutionError, compare_sukisu_channels,
-                                   resolve_sources, validate_ref)
+from resolve_build_sources import SHA, SourceResolutionError, validate_ref
 from wait_manager_identity import GitHubReader, IdentityError, positive_integer
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STABLE = 'Stable(标准)'
-LATEST = 'Latest(最新)'
 CHANNELS = {STABLE: '正式版', LATEST: '最新版'}
 MAX_STATE = 8192
-MAX_SNAPSHOT = 32768
 STATE_VERSION = 2
 STATE_ARTIFACT = 'gki-manager-apk-observations.json'
-ChannelSources = dict[str, dict[str, tuple[str, str]]]
 
 
 def slot_for(variant: str, tier: str) -> str:
@@ -36,43 +32,6 @@ def source(reference: str, branch: str) -> tuple[str, str]:
     if not isinstance(reference, str) or not SHA.fullmatch(reference):
         raise ValueError('预编译 APK 需要完整的官方源码提交 SHA')
     return reference.lower(), validate_ref(branch)
-
-
-def snapshot_channels(document: dict) -> ChannelSources:
-    """Use only verified candidate data and compare SukiSU's two frozen branch heads."""
-    snapshot = validate_snapshot(document)
-    if set(snapshot) != {'schema_version', 'susfs', *(variant.lower() for variant in MANAGERS)}:
-        raise ValueError('预编译需要六种管理器的完整官方检查结果')
-    channels = {}
-    for variant in MANAGERS:
-        item = snapshot[variant.lower()]
-        latest = source(item['head'], item['branch'])
-        if variant == 'SukiSU' and (development := item.get('development')):
-            latest = compare_sukisu_channels(manager_profile(variant)['repository'],
-                                             latest[1], latest[0], development['head'])
-        release = item['release']
-        selected = {LATEST: latest}
-        if release is not None:
-            selected[STABLE] = source(release['commit'], release['tag'])
-        channels[variant] = selected
-    return channels
-
-
-def current_channels(root: Path) -> ChannelSources:
-    """Discover available releases and heads through the normal build resolver."""
-    channels = {}
-    for variant in MANAGERS:
-        selected = {}
-        for tier in CHANNELS:
-            try:
-                item = resolve_sources(root, variant, tier, susfs=True)
-            except NoStableRelease:
-                if tier != STABLE:
-                    raise
-                continue
-            selected[tier] = source(item['ksu_ref'], item['ksu_source_branch'])
-        channels[variant] = selected
-    return channels
 
 
 def state_document(channels: ChannelSources) -> dict:
@@ -157,7 +116,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='operation', required=True)
     discover = commands.add_parser('discover')
-    discover.add_argument('--candidates-json')
     discover.add_argument('--previous', type=Path)
     discover.add_argument('--artifact-history-branch')
     record = commands.add_parser('record')
@@ -173,10 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output.write_text(compact(state_document(channels)) + '\n',
                                    encoding='utf-8', newline='\n')
         else:
-            if args.candidates_json is not None and len(args.candidates_json.encode()) > MAX_SNAPSHOT:
-                raise ValueError('官方管理器检查结果超过大小限制')
-            selected = (current_channels(ROOT) if args.candidates_json is None
-                        else snapshot_channels(json.loads(args.candidates_json)))
+            selected = read_approved(ROOT)
             previous = load_previous(args.previous) if args.previous else {}
             if not previous and args.artifact_history_branch:
                 repository = os.environ['GITHUB_REPOSITORY']
@@ -193,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             if not os.environ.get('GITHUB_OUTPUT'):
                 print(compact(matrix))
             print(f"需预编译 {len(matrix['include'])} 组官方管理器 APK", file=sys.stderr)
-    except (OSError, ValueError, SourceResolutionError, UpdateError, IdentityError) as error:
+    except (OSError, ValueError, SourceResolutionError, IdentityError) as error:
         print(f'::error::管理器 APK 预编译来源检查失败。{error}', file=sys.stderr)
         return 1
     return 0

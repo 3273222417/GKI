@@ -73,7 +73,7 @@ def prebuild_workflow(base: dict) -> dict:
     }
     return {'name': '自动预编译管理器 APK',
             'on': {'workflow_run': {'workflows': [UPDATER_NAME], 'types': ['completed'], 'branches': ['main']},
-                   'push': {'branches': ['main'], 'paths': [OUTPUT]}},
+                   'push': {'branches': ['main'], 'paths': [OUTPUT, 'config/validated-manager-builds.json']}},
             'permissions': {'contents': 'read', 'actions': 'write'},
             'concurrency': {'group': 'gki-official-manager-apk-prebuild', 'cancel-in-progress': False},
             'jobs': {'check-upstream': discovery, **create_jobs(base), 'record-manager-prebuild': record_job()}}

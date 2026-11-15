@@ -498,6 +498,87 @@ class ScopedMergeTests(unittest.TestCase):
         self.assertNotIn('配套验证通过。', body)
 
 
+class ApprovedMergeTests(unittest.TestCase):
+    sync = MergeTests.sync
+    refused = MergeTests.refused
+    select_files = ScopedMergeTests.select_files
+    refresh_candidates = ScopedMergeTests.refresh_candidates
+    susfs_scope = ScopedMergeTests.susfs_scope
+
+    def setUp(self):
+        import verify_manager_update as verifier
+        from approved_manager_builds import LATEST, STABLE, approved_document
+        self.api = FakeAPI()
+        self.latest, self.stable = LATEST, STABLE
+        self.approved = {name: {LATEST: ('7' * 40, 'main')} for name in merge.MANAGERS}
+        self.approved['SukiSU'][STABLE] = ('6' * 40, 'v1')
+        doc = approved_document(self.approved)
+        self.manifest = merge.APPROVED_PATH
+        self.api.documents[self.manifest, BASE] = doc
+        self.api.documents[self.manifest, HEAD] = copy.deepcopy(doc)
+        snapshot = self.api.documents[CANDIDATES, HEAD]['sources']
+        snapshot['bakasu'] = {'branch': 'main', 'head': '7' * 40,
+                              'release': {'tag': 'v2', 'commit': '8' * 40}, 'prerelease': None}
+        self.refresh_candidates()
+        self.api.documents[CANDIDATES, BASE] = copy.deepcopy(self.api.documents[CANDIDATES, HEAD])
+        for name, patcher in (
+            ('checking', patch.object(verifier, 'check_source', return_value={'version_code': 35259, 'checks': []})),
+            ('legacy', patch.object(merge, 'validate_manager_snapshot', side_effect=AssertionError('legacy gate used'))),
+            ('history', patch.object(verifier, 'source_repository', return_value=Path('source-cache'))),
+            ('counts', patch.object(verifier, 'fetch_reference', return_value=20)),
+        ):
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
+
+    def approve_baka(self, *, reference='8' * 40, branch='v2'):
+        self.api.documents[self.manifest, HEAD]['channels']['BakaSU'][self.stable] = {
+            'reference': reference, 'source_branch': branch}
+        from test_update_susfs_sources import profiles
+        self.api.documents[merge.MANAGER_PINS, BASE] = profiles()[1]
+        self.select_files(self.manifest)
+
+    def test_observation_can_sync_without_promoting_or_checking_a_blocked_candidate(self):
+        self.select_files(KERNELS, CANDIDATES)
+        self.assertTrue(self.sync()['merged'])
+        self.checking.assert_not_called()
+        self.assertEqual([('/pulls/1/merge', {'sha': HEAD, 'merge_method': 'squash'})], self.api.mutations)
+
+    def test_selected_stable_promotion_only_checks_that_source_and_leaves_other_slots_held(self):
+        self.approve_baka()
+        self.assertTrue(self.sync()['merged'])
+        self.checking.assert_called_once()
+        self.assertEqual(('BakaSU', '8' * 40), self.checking.call_args.args[1:3])
+
+    def test_wrong_approval_commit_or_tag_cannot_enter_the_default_branch(self):
+        for reference, branch in (('9' * 40, 'v2'), ('8' * 40, 'v3')):
+            with self.subTest(branch=branch, reference=reference):
+                self.approve_baka(reference=reference, branch=branch)
+                self.refused()
+        self.checking.assert_not_called()
+
+    def test_unavailable_stable_does_not_permit_an_approved_channel_to_be_removed(self):
+        self.approve_baka()
+        self.api.documents[self.manifest, HEAD]['channels']['SukiSU'].pop(self.stable)
+        self.select_files(self.manifest)
+        self.refused()
+        self.checking.assert_not_called()
+
+    def test_new_source_failure_or_head_drift_prevents_merge(self):
+        self.approve_baka()
+        self.checking.side_effect = merge.ManagerUpdateError('Native source integration failed')
+        self.refused()
+        self.checking.side_effect = lambda *args, **kwargs: (
+            setattr(self.api, 'drift', 'head') or {'version_code': 35259, 'checks': []})
+        self.refused()
+
+    def test_pin_only_update_rechecks_all_existing_channels_on_the_changed_pin(self):
+        update, transport = self.susfs_scope(advance=True)
+        with patch.object(update, 'request_bytes', side_effect=transport):
+            self.assertTrue(self.sync()['merged'])
+        self.assertIn(('SukiSU', '6' * 40), [call.args[1:3] for call in self.checking.call_args_list])
+        self.assertIn(('SukiSU', '7' * 40), [call.args[1:3] for call in self.checking.call_args_list])
+
+
 class ClientTests(unittest.TestCase):
     def setUp(self):
         validation = patch.object(merge, 'validate_manager_snapshot', return_value={'passed': True})

@@ -12,14 +12,13 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 
-from check_official_updates import TARGETS
+from approved_manager_builds import APPROVED_PATH
 from generate_workflow import create_workflow
-from manager_prebuild import (CHANNELS, LATEST, STABLE, STATE_ARTIFACT, current_channels, plan,
-                              restore_previous, snapshot_channels, validate_state)
+from manager_prebuild import (LATEST, STABLE, STATE_ARTIFACT, main, plan,
+                              restore_previous, validate_state)
 from manager_prebuild_workflow import OUTPUT, STATE_KEY, UPDATER_PATH, prebuild_workflow
 from manager_variants import MANAGERS
 from prebuilt_manager_history import WORKFLOW_API, WORKFLOW_PATH, run_artifacts, successful_runs, verified_artifact
-from resolve_build_sources import NoStableRelease, SourceResolutionError
 from wait_manager_identity import IdentityError
 from workflow_jobs import updater_workflow
 
@@ -28,16 +27,13 @@ def ref(number: int) -> str:
     return f'{number:040x}'
 
 
-def source_snapshot() -> dict:
-    document = {'schema_version': 1, 'susfs': {target: ref(50) for target in TARGETS}}
-    for number, variant in enumerate(MANAGERS, start=1):
-        document[variant.lower()] = {'branch': 'main', 'head': ref(number),
-                                     'release': {'tag': 'v4.0', 'commit': ref(number + 10)}}
-    document['sukisu']['release']['newer_than_baseline'] = True
-    document['sukisu']['development'] = {'branch': 'dev', 'head': ref(31)}
-    document['bakasu'].update(release=None, prerelease={'tag': 'rc1', 'commit': ref(32)})
-    document['finasu']['release']['commit'] = document['finasu']['head']
-    return document
+def approved_channels() -> dict:
+    channels = {variant: {LATEST: (ref(number), 'main'), STABLE: (ref(number + 10), 'v4.0')}
+                for number, variant in enumerate(MANAGERS, start=1)}
+    channels['SukiSU'][LATEST] = (ref(31), 'dev')
+    channels['BakaSU'].pop(STABLE)
+    channels['FinaSU'][STABLE] = (channels['FinaSU'][LATEST][0], 'v4.0')
+    return channels
 
 
 def history_run(run_id: int, **changes) -> dict:
@@ -66,14 +62,8 @@ class FakeHistory:
 
 
 class ManagerPrebuildTest(unittest.TestCase):
-    def snapshot(self, document=None):
-        with patch('manager_prebuild.compare_sukisu_channels', return_value=(ref(31), 'dev')) as compare:
-            channels = snapshot_channels(source_snapshot() if document is None else document)
-        compare.assert_called_once_with('SukiSU-Ultra/SukiSU-Ultra', 'main', ref(1), ref(31))
-        return channels
-
     def test_backfill_uses_frozen_official_tiers_and_deduplicates_same_sha(self):
-        channels = self.snapshot()
+        channels = approved_channels()
         matrix, state = plan(channels, {})
         self.assertEqual(len(matrix['include']), 10)
         by_manager = {}
@@ -86,18 +76,16 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertEqual(by_manager['FinaSU'][0]['tier'], STABLE)
         self.assertEqual(validate_state(json.loads(json.dumps(state)))['SukiSU'][LATEST], (ref(31), 'dev'))
 
-    def test_automatic_only_builds_changed_source_independent_of_susfs_and_prerelease(self):
-        _, state = plan(self.snapshot(), {})
-        document = source_snapshot()
-        document['susfs'][TARGETS[0]] = ref(77)
-        document['bakasu']['prerelease']['commit'] = ref(81)
-        document['kowsu']['head'] = ref(82)
-        matrix, _ = plan(self.snapshot(document), validate_state(state))
+    def test_automatic_only_builds_changed_approved_channels(self):
+        channels = approved_channels()
+        _, state = plan(channels, {})
+        channels['KowSU'][LATEST] = (ref(82), 'main')
+        matrix, _ = plan(channels, validate_state(state))
         self.assertEqual([(row['variant'], row['tier'], row['reference']) for row in matrix['include']],
                          [('KowSU', LATEST, ref(82))])
 
     def test_new_formal_channel_is_built_even_if_its_commit_is_already_latest(self):
-        channels = self.snapshot()
+        channels = approved_channels()
         _, state = plan(channels, {})
         channels['BakaSU'][STABLE] = (channels['BakaSU'][LATEST][0], 'v4.0')
         matrix, _ = plan(channels, validate_state(state))
@@ -105,7 +93,7 @@ class ManagerPrebuildTest(unittest.TestCase):
                                              'slot': 'bakasu_stable', 'source_branch': 'v4.0', 'channels': '正式版'}])
 
     def test_changed_formal_tag_on_same_commit_is_one_new_build(self):
-        channels = self.snapshot()
+        channels = approved_channels()
         _, state = plan(channels, {})
         channels['FinaSU'][STABLE] = (ref(6), 'v4.0-r2')
         matrix, _ = plan(channels, validate_state(state))
@@ -113,7 +101,7 @@ class ManagerPrebuildTest(unittest.TestCase):
                                              'slot': 'finasu_stable', 'source_branch': 'v4.0-r2', 'channels': '正式版'}])
 
     def test_removed_channel_has_no_build_but_a_reintroduced_release_is_selected(self):
-        channels = self.snapshot()
+        channels = approved_channels()
         _, before = plan(channels, {})
         stable = channels['FinaSU'].pop(STABLE)
         matrix, observed = plan(channels, validate_state(before))
@@ -123,34 +111,30 @@ class ManagerPrebuildTest(unittest.TestCase):
         matrix, _ = plan(channels, validate_state(observed))
         self.assertEqual([row['variant'] for row in matrix['include']], ['FinaSU'])
 
-    def test_backfill_ignores_only_confirmed_missing_stable_release(self):
-        def resolve(root, variant, tier, *, susfs):
-            self.assertTrue(susfs)
-            if variant == 'BakaSU' and tier == STABLE:
-                raise NoStableRelease('no formal release')
-            return {'ksu_ref': ref(MANAGERS.index(variant) + (10 if tier == STABLE else 1)),
-                    'ksu_source_branch': 'main' if tier == LATEST else 'v4.0'}
+    def test_discovery_uses_the_approved_versions_without_observing_live_channels(self):
+        channels = approved_channels()
+        with patch('manager_prebuild.read_approved', return_value=channels) as read, \
+                patch('resolve_build_sources.github_json') as network, \
+                patch('manager_prebuild.write_outputs') as outputs, \
+                patch.dict('os.environ', {'GITHUB_OUTPUT': 'test-output'}):
+            self.assertEqual(main(['discover']), 0)
+        read.assert_called_once_with(ROOT)
+        network.assert_not_called()
+        matrix = json.loads(outputs.call_args.args[0]['matrix'])['include']
+        self.assertEqual({row['tier'] for row in matrix if row['variant'] == 'BakaSU'}, {LATEST})
+        self.assertIn(ref(31), {row['reference'] for row in matrix if row['variant'] == 'SukiSU'})
 
-        with patch('manager_prebuild.resolve_sources', side_effect=resolve) as lookup:
-            channels = current_channels(ROOT)
-        self.assertEqual(lookup.call_count, len(MANAGERS) * len(CHANNELS))
-        self.assertNotIn(STABLE, channels['BakaSU'])
-        with patch('manager_prebuild.resolve_sources', side_effect=SourceResolutionError('lookup failed')):
-            with self.assertRaises(SourceResolutionError):
-                current_channels(ROOT)
-
-    def test_rejects_incomplete_snapshot_and_invalid_observation_state(self):
-        document = source_snapshot()
-        del document['finasu']
+    def test_rejects_incomplete_and_invalid_observation_state(self):
+        _, state = plan(approved_channels(), {})
+        incomplete = {**state, 'channels': {key: value for key, value in state['channels'].items() if key != 'FinaSU'}}
         with self.assertRaises(ValueError):
-            snapshot_channels(document)
-        _, state = plan(self.snapshot(), {})
+            validate_state(incomplete)
         state['channels']['BakaSU'][LATEST]['reference'] = 'main'
         with self.assertRaises(ValueError):
             validate_state(state)
 
     def test_evicted_state_recovers_from_successful_verified_standalone_run(self):
-        channels = self.snapshot()
+        channels = approved_channels()
         _, state = plan(channels, {})
         payload = json.dumps(state).encode()
         reader = FakeHistory({
@@ -200,7 +184,7 @@ class ManagerPrebuildTest(unittest.TestCase):
         workflow = prebuild_workflow(create_workflow(ROOT))
         self.assertEqual(workflow['on'], {'workflow_run': {'workflows': [updater['name']],
                                          'types': ['completed'], 'branches': ['main']},
-                                         'push': {'branches': ['main'], 'paths': [OUTPUT]}})
+                                         'push': {'branches': ['main'], 'paths': [OUTPUT, APPROVED_PATH]}})
         discovery = workflow['jobs']['check-upstream']
         self.assertIn(f"github.event.workflow_run.path == '{UPDATER_PATH}'", discovery['if'])
         self.assertIn('github.event.workflow_run.head_repository.full_name == github.repository', discovery['if'])

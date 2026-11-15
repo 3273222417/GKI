@@ -244,9 +244,15 @@ class WorkflowTests(unittest.TestCase):
     def test_updater_validates_before_publishing_and_skips_existing_candidate(self):
         steps = self.updater['jobs']['check-upstream']['steps']
         indexed = {step['id']: (i, step) for i, step in enumerate(steps) if 'id' in step}
-        self.assertLess(indexed['guard'][0], indexed['update'][0])
-        self.assertLess(indexed['update'][0], indexed['pr'][0])
-        self.assertEqual("steps.probe.outputs.has_updates == 'true'", indexed['update'][1]['if'])
+        self.assertLess(indexed['prepare-sources'][0], indexed['manager-approval'][0])
+        self.assertLess(indexed['manager-approval'][0], indexed['update'][0])
+        self.assertLess(indexed['update'][0], indexed['guard'][0])
+        self.assertLess(indexed['guard'][0], indexed['pr'][0])
+        self.assertIn("steps.manager-approval.outputs.approved_changed == 'true'", indexed['update'][1]['if'])
+        approval = indexed['manager-approval'][1]
+        self.assertIn("inputs.operation == '同步官方更新'", approval['if'])
+        self.assertNotIn('steps.probe.outputs.has_updates', approval['if'])
+        self.assertEqual(indexed['guard'][1]['env']['HEADS_MARKER'], '${{ steps.update.outputs.heads_marker }}')
         self.assertIn('official_sync_report.py --root . --base-ref HEAD', indexed['update'][1]['run'])
         pr = indexed['pr'][1]
         self.assertEqual(pr['if'], "steps.update.outputs.has_updates == 'true' && steps.guard.outputs.already_pending != 'true'")
@@ -257,13 +263,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(set(pr['with']['add-paths'].splitlines()), {
             'data/kernels.json', 'data/upstream-candidates.json', 'data/susfs-upstream-candidates.json',
             'build-compatibility.json', 'config/manager-susfs-pins.json', 'data/oplus-upstream-candidates.json',
-            'config/oplus-cctv-profiles.json', 'third_party/cctv-oplus/recipes/*.yml'})
+            'config/oplus-cctv-profiles.json', 'config/validated-manager-builds.json', 'third_party/cctv-oplus/recipes/*.yml'})
         sync = indexed['sync'][1]
         self.assertLess(indexed['pr'][0], indexed['sync'][0])
         self.assertIn('tools/auto_merge_official_update.py', sync['run'])
         self.assertIn('--compatibility-report', sync['run'])
         self.assertIn("steps.probe.outputs.partial_failure != 'true'", sync['if'])
-        self.assertIn("steps.prepare-sources.outputs.partial_failure == 'false'", sync['if'])
+        self.assertIn("steps.prepare-sources.outputs.partial_failure != 'true'", sync['if'])
         prepared = indexed['prepare-sources'][1]
         self.assertLess(indexed['prepare-sources'][0], indexed['update'][0])
         self.assertIn('tools/prepare_source_updates.py', prepared['run'])
@@ -277,7 +283,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('--observe-source-changes', update['run'])
         self.assertIn('report_preview', update['run'])
         self.assertNotIn('--apply-candidates-json', update['run'])
-        self.assertEqual(update['env']['SUSFS_RESULT'], '${{ steps.prepare-sources.outputs.susfs_result }}')
+        self.assertEqual(update['env']['SUSFS_RESULT'],
+                         '${{ steps.prepare-sources.outputs.susfs_result || steps.susfs.outcome }}')
         self.assertNotIn('sync_upstream.py', str(steps))
         self.assertNotIn('xingguangcuican6666', str(steps))
 
@@ -339,7 +346,7 @@ class WorkflowTests(unittest.TestCase):
                         (False, False, False), (True, False, False), (False, True, False), (True, True, False),
                         (False, False, True), (True, False, True), (False, True, True), (True, True, True)):
                     values = {'github.event_name': repr(event), 'inputs.operation': repr(operation),
-                              'steps.probe.outputs.has_updates': repr('true'),
+                              'steps.update.outputs.has_updates': repr('true'),
                               'steps.probe.outputs.partial_failure': repr(str(partial).lower()),
                               'steps.prepare-sources.outputs.partial_failure': repr(str(prepared_partial).lower()),
                               'steps.pr.outputs.pull-request-number': repr('' if pending else '12'),
@@ -409,7 +416,7 @@ class WorkflowTests(unittest.TestCase):
         environment = {'RUNNER_TEMP': str(directory), 'GITHUB_OUTPUT': str(output),
                        'OFFICIAL_RESULT': 'success', 'CATALOG_RESULT': 'failure',
                        'SUSFS_RESULT': 'success', 'OPLUS_RESULT': 'success',
-                       'PREPARED_CHANGED': 'true', 'PREPARED_PARTIAL': 'true',
+                       'PREPARED_PARTIAL': 'true', 'SYNC_PATHS': step['env']['SYNC_PATHS'],
                        'HEADS_MARKER': '<!-- gki-official-heads:sha256=' + 'a' * 64 + ' -->',
                        'OFFICIAL_CANDIDATES': '{}', 'CATALOG_CANDIDATES': ''}
         with patch.dict(os.environ, environment):

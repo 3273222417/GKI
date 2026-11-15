@@ -37,7 +37,7 @@ class SourceResolutionError(RuntimeError):
 
 
 class NoStableRelease(SourceResolutionError):
-    """The official repository explicitly has no published stable release."""
+    """No stable release is available from the selected source of truth."""
 
 
 def validate_ref(value: str, *, empty: bool = False) -> str:
@@ -260,7 +260,17 @@ def resolve_sources(root: Path, variant: str, tier: str, custom_ref: str = "", s
     if variant == "None":
         return source_result("", "", "", tier)
     repository = REPOSITORIES[variant]
-    commit, branch = official_selection(repository, tier, custom_ref)
+    from approved_manager_builds import LATEST, STABLE, read_approved
+    if tier in (STABLE, LATEST):
+        try:
+            channels = read_approved(root)['KernelSU' if variant == 'Official' else variant]
+        except (OSError, ValueError) as error:
+            raise SourceResolutionError('无法读取已验证管理器版本：' + str(error)) from None
+        if tier == STABLE and tier not in channels:
+            raise NoStableRelease('暂无通过校验的正式版，请选择“最新版”或先同步上游更新。')
+        commit, branch = channels[tier]
+    else:
+        commit, branch = official_selection(repository, tier, custom_ref)
     if not SHA.fullmatch(commit):
         raise SourceResolutionError("KernelSU source must resolve to a full commit SHA")
     return source_result(commit.lower(), repository, branch, tier)

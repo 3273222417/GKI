@@ -12,7 +12,8 @@ from resolve_build_sources import (NoStableRelease, REPOSITORIES, SHA, TIERS, TI
                                    SourceResolutionError, resolve_sources, validate_ref)
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_REASON = '官方尚未发布正式版'
+SKIP_REASON = '暂无通过校验的正式版'
+LEGACY_SKIP_REASON = '官方尚未发布正式版'
 LATEST_STABLE_REASON = '最新版与正式版源码相同'
 SOURCE_FIELDS = {'ksu_ref', 'ksu_repo', 'ksu_short', 'ksu_source_branch', 'effective_ksu_branch'}
 FIELDS = {'schema_version', 'selection', 'tier', 'active_managers', 'skipped_managers', 'sources'}
@@ -67,7 +68,7 @@ def validate_receipt(document, selection=None):
         raise ValueError('Only combined stable/latest builds can skip a manager')
     for name, row in zip(omitted, skipped):
         if tier == 'Stable(标准)':
-            if row != {'variant': name, 'reason': SKIP_REASON}:
+            if row not in ({'variant': name, 'reason': SKIP_REASON}, {'variant': name, 'reason': LEGACY_SKIP_REASON}):
                 raise ValueError('Unexpected skipped-manager identity or reason')
         else:
             if (not isinstance(row, dict)
@@ -132,7 +133,7 @@ def selection_summary(receipt):
         lines.append('- 跳过 ' + row['variant'] + '：' + row['reason'] + '。')
     if not receipt['active_managers']:
         message = ('所选管理器的最新版均与正式版相同' if effective_tier(receipt['tier']) == 'Latest(最新)'
-                   else '所选管理器均未发布正式版')
+                   else '所选管理器暂无通过校验的正式版')
         lines += ['', message + '，本次不编译、不发行。']
     return '\n'.join(lines) + '\n'
 

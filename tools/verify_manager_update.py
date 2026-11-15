@@ -5,12 +5,17 @@ patches are inspected. No upstream build/setup script is executed here.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 import time
 
+from approved_manager_builds import APPROVED_PATH, LATEST, STABLE, approved_document, read_approved, validate_approved
 from check_official_updates import validate_snapshot
 from manager_variants import MANAGERS, manager_profile
 from official_manager_versions import NETWORK, _gradle_version
@@ -19,6 +24,10 @@ from snapshot_ksu_source import git, temporary_directory, SnapshotError
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA = re.compile(r'[0-9a-f]{40}\Z')
+PROFILE = 'build-compatibility.json'
+MANAGER_PINS = 'config/manager-susfs-pins.json'
+SUSFS_RECEIPT = 'data/susfs-upstream-candidates.json'
+CHANNELS = {STABLE: '正式版', LATEST: '测试版'}
 
 
 class ManagerUpdateError(ValueError):
@@ -29,6 +38,14 @@ class SourceIntegrationError(ManagerUpdateError):
     def __init__(self, message: str, version_code: int):
         self.version_code = version_code
         super().__init__(message)
+
+
+def verification_error(error):
+    if isinstance(error, subprocess.CalledProcessError):
+        return f'配套源码命令执行失败（退出码 {error.returncode}）'
+    if isinstance(error, subprocess.SubprocessError):
+        return '配套源码命令未完成'
+    return str(error)[:1500]
 
 
 def source_repository(cache: Path, variant: str) -> Path:
@@ -157,9 +174,123 @@ def check_source(repository: Path, variant: str, reference: str, count: int, *,
                 from prepare_additional_gradle import prepare
                 prepare(source, variant)
                 checks.append('原生 APK 构建配置及官方包名')
-        except (OSError, ValueError, RuntimeError) as error:
-            raise SourceIntegrationError(str(error), code) from None
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            raise SourceIntegrationError(verification_error(error), code) from None
         return {'version_code': code, 'checks': checks}
+
+
+def susfs_options(variant, configuration, inputs_cache):
+    if configuration is None or variant not in configuration[0]:
+        return {}
+    from pin_build_dependencies import SUSFS_24
+    pins, versions = configuration
+    pins24 = {target: pins[variant][target] for target, version in versions[variant].items()
+              if version == SUSFS_24}
+    if not pins24:
+        return {}
+    return {'susfs24_pins': pins24, 'legacy_susfs': len(pins24) < len(pins[variant]),
+            'susfs24_cache': inputs_cache}
+
+
+def observed_channel(snapshot, variant, tier):
+    """Select the same stable/latest identity as the official version checker."""
+    record = snapshot.get(variant.lower())
+    if record is None:
+        return None
+    if tier == STABLE:
+        release = record['release']
+        return (release['commit'], release['tag']) if release else None
+    if variant == 'SukiSU' and (development := record.get('development')):
+        from resolve_build_sources import compare_sukisu_channels
+        return compare_sukisu_channels(manager_profile(variant)['repository'],
+                                       record['branch'], record['head'], development['head'])
+    return record['head'], record['branch']
+
+
+def changed_pins(before, after):
+    """Changing a pin affects every approved channel for that manager."""
+    return {variant for variant in MANAGERS
+            if any(old.get(variant) != new.get(variant) for old, new in zip(before, after))}
+
+
+def selected_checks(identities, *, cache, susfs_configuration):
+    rows, repositories, results, inputs_cache = {}, {}, {}, {}
+    for (variant, tier), (reference, branch) in identities.items():
+        row = {'source': variant, 'channel': CHANNELS[tier], 'commit': reference,
+               'ref': branch, 'version_code': None, 'checks': []}
+        key = variant, reference
+        if key not in results:
+            try:
+                if variant not in repositories:
+                    repositories[variant] = source_repository(cache, variant)
+                repository = repositories[variant]
+                count = fetch_reference(repository, reference)
+                proof = check_source(repository, variant, reference, count,
+                                     **susfs_options(variant, susfs_configuration, inputs_cache))
+                results[key] = {**proof, 'status': 'passed', 'reason': '配套源码验证通过，未编译 APK 或内核'}
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                results[key] = {'status': 'failure', 'reason': verification_error(error),
+                                'version_code': getattr(error, 'version_code', None)}
+        rows[variant, tier] = {**row, **results[key]}
+    return rows
+
+
+def approved_slots(channels, variants=MANAGERS):
+    return {(variant, tier): identity for variant in MANAGERS if variant in variants
+            for tier, identity in channels[variant].items()}
+
+
+def plan_approvals(channels, snapshot, *, cache, before_pins, proposed_pins):
+    """Advance passing slots and retain each failing slot's approved identity."""
+    snapshot = validate_snapshot(snapshot)
+    retained = selected_checks(approved_slots(channels, changed_pins(before_pins, proposed_pins)),
+                               cache=cache, susfs_configuration=proposed_pins)
+    retain_pins = any(row['status'] == 'failure' for row in retained.values())
+    configuration = before_pins if retain_pins else proposed_pins
+    candidates, failures = {}, []
+    for variant in MANAGERS:
+        for tier, label in CHANNELS.items():
+            try:
+                observed = observed_channel(snapshot, variant, tier)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                failures.append({'source': variant, 'channel': label, 'commit': None, 'ref': None,
+                                 'version_code': None, 'checks': [], 'status': 'failure',
+                                 'reason': verification_error(error)})
+                continue
+            if observed is not None and observed != channels[variant].get(tier):
+                candidates[variant, tier] = observed
+    checks = selected_checks(candidates, cache=cache, susfs_configuration=configuration)
+    updated = {name: dict(tiers) for name, tiers in channels.items()}
+    for (variant, tier), row in checks.items():
+        if row['status'] == 'passed':
+            updated[variant][tier] = candidates[variant, tier]
+    kept = [row for row in retained.values() if row['status'] == 'failure']
+    rows = list(checks.values()) + failures
+    return updated, {'schema_version': 1, 'rows': rows, 'pin_failures': kept,
+                     'approved_changed': updated != channels, 'pins_retained': retain_pins,
+                     'pending_slots': sum(row['status'] == 'failure' for row in rows)}
+
+
+def validate_approved_changes(channels, new_channels, snapshot, *, cache, before_pins, proposed_pins):
+    """Independently verify the exact subset that the frozen PR advances."""
+    snapshot = validate_snapshot(snapshot) if snapshot is not None else None
+    previous, proposed = approved_slots(channels), approved_slots(new_channels)
+    if previous.keys() - proposed.keys():
+        raise ManagerUpdateError('Official sync cannot remove an approved manager channel')
+    promoted = {key: identity for key, identity in proposed.items() if previous.get(key) != identity}
+    for (variant, tier), identity in promoted.items():
+        if snapshot is None or observed_channel(snapshot, variant, tier) != identity:
+            raise ManagerUpdateError(f'{variant} {CHANNELS[tier]} 与本次固定的上游版本不符')
+    retained_slots = approved_slots(channels, changed_pins(before_pins, proposed_pins))
+    # Check both old and newly promoted references when a shared pin moves.
+    retained = selected_checks(retained_slots, cache=cache, susfs_configuration=proposed_pins)
+    checks_needed = {key: identity for key, identity in promoted.items() if retained_slots.get(key) != identity}
+    checks = selected_checks(checks_needed, cache=cache, susfs_configuration=proposed_pins)
+    failures = [row for row in (*retained.values(), *checks.values()) if row['status'] == 'failure']
+    if failures:
+        detail = '; '.join(row['source'] + ' ' + row['channel'] + ': ' + row['reason'] for row in failures)
+        raise ManagerUpdateError('同步变更未通过配套验证，未合并。' + detail)
+    return {'schema_version': 1, 'passed': True, 'rows': [*retained.values(), *checks.values()]}
 
 
 def validate_manager_snapshot(snapshot: dict, *, cache: Path, report_path: Path | None = None,
@@ -197,19 +328,11 @@ def validate_manager_snapshot(snapshot: dict, *, cache: Path, report_path: Path 
                                 else {old.get('head'), (old.get('development') or {}).get('head')}
                                 if tier == '测试版' else set())
                     row['changed'] = reference not in old_refs
-                selected = {}
-                if susfs_configuration is not None and variant in susfs_configuration[0]:
-                    from pin_build_dependencies import SUSFS_24
-                    pins, versions = susfs_configuration
-                    pins24 = {target: pins[variant][target] for target, version in versions[variant].items()
-                              if version == SUSFS_24}
-                    if pins24:
-                        selected = {'susfs24_pins': pins24, 'legacy_susfs': len(pins24) < len(pins[variant]),
-                                    'susfs24_cache': susfs24_cache}
+                selected = susfs_options(variant, susfs_configuration, susfs24_cache)
                 result = check_source(repository, variant, reference, count, **selected)
                 row.update(result, status='passed', reason='配套源码验证通过，未编译 APK 或内核')
-            except (OSError, ValueError, RuntimeError) as error:
-                row.update(status='failure', reason=str(error)[:1500])
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                row.update(status='failure', reason=verification_error(error))
                 if isinstance(error, SourceIntegrationError):
                     row['version_code'] = error.version_code
     passed = bool(rows) and all(row['status'] in ('passed', 'unavailable') for row in rows)
@@ -232,3 +355,78 @@ def render_report(result: dict) -> str:
         reason = row['reason'].replace('`', '').replace('|', '/').replace('\n', ' ')
         lines.append('\n' + row['source'] + ' ' + row['channel'] + '：失败，未同步。' + reason)
     return '\n'.join(lines) + '\n'
+
+
+def write_promotion_report(path: Path, plan: dict):
+    path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
+    lines = ['### 管理器配套验证', '']
+    for row in plan['rows']:
+        detail = row['reason'].replace('\n', ' ')
+        version = (' ' + str(row['version_code'])) if row['version_code'] is not None else ''
+        state = '通过，可同步' if row['status'] == 'passed' else '待适配，保留当前版本'
+        lines.append(f"- {row['source']}{version} {row['channel']} · {state}。{detail}")
+    for row in plan['pin_failures']:
+        reason = row['reason'].replace('\n', ' ')
+        lines.append(f"- {row['source']} {row['channel']} · 保留原 SUSFS 构建引用。{reason}")
+    if not plan['rows'] and not plan['pin_failures']:
+        lines.append('本次没有待同步的管理器版本。')
+    path.with_suffix('.md').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
+
+
+def prepare_promotions(root: Path, sources: Path, cache: Path, report: Path) -> dict:
+    from official_susfs_archive import git_bytes
+    from official_sync_report import read_git_document, read_worktree_document
+    from prepare_source_updates import restore_files
+    from update_susfs_sources import configured_pins
+
+    root = root.resolve(strict=True)
+    sources = root / sources
+    if not sources.resolve(strict=True).is_relative_to(root):
+        raise ManagerUpdateError('Manager observation must stay inside the repository')
+    observed = read_worktree_document(root, sources.relative_to(root).as_posix())['sources']
+    base = git(root, 'rev-parse', '--verify', 'HEAD^{commit}')
+    approved = read_approved(root)
+    if approved != validate_approved(read_git_document(root, base, APPROVED_PATH)):
+        raise ManagerUpdateError('Approved manager channels changed before planning the sync')
+    before = configured_pins(read_git_document(root, base, PROFILE), read_git_document(root, base, MANAGER_PINS))
+    proposed = configured_pins(read_worktree_document(root, PROFILE), read_worktree_document(root, MANAGER_PINS))
+    advanced, plan = plan_approvals(approved, observed, cache=cache, before_pins=before, proposed_pins=proposed)
+    if git(root, 'rev-parse', '--verify', 'HEAD^{commit}') != base:
+        raise ManagerUpdateError('Default branch changed while planning manager promotions')
+    if plan['pins_retained']:
+        previous = {}
+        for name in (PROFILE, MANAGER_PINS, SUSFS_RECEIPT):
+            previous[name] = (git_bytes(root, 'show', base + ':' + name)
+                              if git_bytes(root, 'ls-tree', '-z', base, '--', name) else None)
+        restore_files(root, previous)
+    if plan['approved_changed']:
+        raw = json.dumps(approved_document(advanced), ensure_ascii=False, indent=2) + '\n'
+        restore_files(root, {APPROVED_PATH: raw.encode('utf-8')})
+    write_promotion_report(report, plan)
+    return plan
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, default=ROOT)
+    parser.add_argument('--sources', required=True, type=Path)
+    parser.add_argument('--source-cache', required=True, type=Path)
+    parser.add_argument('--compatibility-report', required=True, type=Path)
+    parser.add_argument('--github-output', type=Path,
+                        default=Path(os.environ['GITHUB_OUTPUT']) if os.environ.get('GITHUB_OUTPUT') else None)
+    args = parser.parse_args(argv)
+    try:
+        result = prepare_promotions(args.root, args.sources, args.source_cache, args.compatibility_report)
+        if args.github_output:
+            with args.github_output.open('a', encoding='utf-8', newline='\n') as stream:
+                for name in ('approved_changed', 'pending_slots', 'pins_retained'):
+                    stream.write(f'{name}={str(result[name]).lower()}\n')
+        return 0
+    except (OSError, KeyError, TypeError, ValueError, RuntimeError) as error:
+        message = str(error).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print('::error::无法准备管理器配套更新：' + message, file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

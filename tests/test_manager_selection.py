@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 import resolve_build_sources as sources
 import resolve_manager_selection as selection
-from manager_variants import COMBINED_GROUPS, COMBINED_SELECTION, selected_managers
+from approved_manager_builds import LATEST, STABLE
+from manager_variants import COMBINED_GROUPS, COMBINED_SELECTION, MANAGERS, selected_managers
 
 
 def source(variant, tier='正式版', reference=None, branch=None):
@@ -80,40 +81,28 @@ class ManagerSelectionTests(unittest.TestCase):
             with self.assertRaisesRegex(sources.SourceResolutionError, 'network failure'):
                 selection.resolve_selection(COMBINED_SELECTION, '正式版')
 
-    def test_actual_source_resolver_skips_only_missing_release_and_freezes_other_tags(self):
-        missing = sources.REPOSITORIES['BakaSU']
-        calls = []
-        def api(repository, resource='', **kwargs):
-            calls.append((repository, resource))
-            if resource == '/releases/latest':
-                return None if repository == missing else {'tag_name': 'v1.0', 'draft': False, 'prerelease': False}
-            if resource == '/commits/v1.0':
-                return {'sha': hashlib.sha1(repository.encode()).hexdigest()}
-            if resource == '':
-                return {'full_name': repository}
-            raise AssertionError('Unexpected lookup or fallback: ' + resource)
-        with patch.object(sources, 'github_json', side_effect=api):
+    def test_actual_source_resolver_skips_only_missing_approved_release_and_freezes_other_tags(self):
+        channels = {variant: {LATEST: (source(variant, LATEST)['ksu_ref'], 'main')} for variant in MANAGERS}
+        for variant in ('SukiSU', 'KernelSU-Next'):
+            channels[variant][STABLE] = (source(variant)['ksu_ref'], 'v1.0')
+        with patch('approved_manager_builds.read_approved', return_value=channels), \
+                patch.object(sources, 'github_json') as api:
             receipt = selection.resolve_selection(COMBINED_SELECTION, '正式版')
+        api.assert_not_called()
         self.assertEqual(['SukiSU', 'KernelSU-Next'], receipt['active_managers'])
-        self.assertNotIn((missing, '/commits/v1.0'), calls)
         self.assertTrue(all(row['ksu_source_branch'] == 'v1.0' for row in receipt['sources'].values()))
+        self.assertIn('暂无通过校验的正式版', selection.selection_summary(receipt))
 
-    def test_missing_release_does_not_hide_an_inaccessible_or_wrong_repository(self):
-        for identity in ({'full_name': 'unexpected/repository'}, {},
-                         sources.SourceResolutionError('repository inaccessible')):
-            with self.subTest(identity=identity), patch.object(sources, 'github_json', side_effect=[None, identity]):
-                with self.assertRaises(sources.SourceResolutionError) as caught:
-                    selection.resolve_selection(COMBINED_SELECTION, '正式版')
-                self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
+    def test_older_missing_stable_receipts_still_validate(self):
+        receipt = resolve(missing=('BakaSU',))
+        receipt['skipped_managers'][0]['reason'] = '官方尚未发布正式版'
+        self.assertEqual(('SukiSU', 'KernelSU-Next'), selection.active_managers(COMBINED_SELECTION, receipt))
 
-    def test_invalid_or_prerelease_responses_fail_instead_of_skipping(self):
-        for document in ({}, {'tag_name': None},
-                         {'tag_name': 'v1.0', 'draft': True, 'prerelease': False},
-                         {'tag_name': 'v1.0', 'draft': False, 'prerelease': True}):
-            with self.subTest(document=document), patch.object(sources, 'github_json', return_value=document):
-                with self.assertRaises(sources.SourceResolutionError) as caught:
-                    selection.resolve_selection(COMBINED_SELECTION, '正式版')
-                self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
+    def test_invalid_approval_table_cannot_be_treated_as_missing_stable(self):
+        with patch('approved_manager_builds.read_approved', side_effect=ValueError('invalid manifest')):
+            with self.assertRaisesRegex(sources.SourceResolutionError, 'invalid manifest') as caught:
+                selection.resolve_selection(COMBINED_SELECTION, '正式版')
+        self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
 
     def test_receipt_rejects_forged_subsets_sources_and_skip_reasons(self):
         original = resolve(missing=('BakaSU',))
@@ -243,35 +232,13 @@ class LatestManagerSelectionTests(unittest.TestCase):
                     with self.assertRaisesRegex(sources.SourceResolutionError, reason):
                         selection.resolve_selection(group, '最新版', susfs=True)
 
-    def test_real_resolver_rejects_draft_prerelease_and_malformed_formal_responses(self):
-        invalid = ({}, {'tag_name': None}, {'tag_name': 'v1.0', 'draft': True, 'prerelease': False},
-                   {'tag_name': 'v1.0', 'draft': False, 'prerelease': True})
-        for group in COMBINED_GROUPS:
-            for formal in invalid:
-                def api(repository, resource='', **kwargs):
-                    if resource == '':
-                        return {'full_name': repository, 'default_branch': 'main'}
-                    if resource == '/commits/main':
-                        return {'sha': hashlib.sha1((repository + '@latest').encode()).hexdigest()}
-                    if resource == '/branches/dev':
-                        return None
-                    if resource == '/releases/latest':
-                        return formal
-                    raise AssertionError('Unexpected API lookup: ' + resource)
-                with self.subTest(group=group, formal=formal), patch.object(sources, 'github_json', side_effect=api):
-                    with self.assertRaises(sources.SourceResolutionError) as caught:
-                        selection.resolve_selection(group, '最新版', susfs=True)
-                    self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
-
-    def test_real_missing_formal_response_keeps_latest_only_for_identified_repository(self):
+    def test_real_resolver_keeps_approved_latest_when_no_formal_version_is_approved(self):
+        channels = {variant: {LATEST: (source(variant, LATEST)['ksu_ref'], 'main')} for variant in MANAGERS}
         for group, requested in COMBINED_GROUPS.items():
-            def api(repository, resource='', **kwargs):
-                if resource == '': return {'full_name': repository, 'default_branch': 'main'}
-                if resource == '/commits/main': return {'sha': hashlib.sha1(repository.encode()).hexdigest()}
-                if resource in ('/branches/dev', '/releases/latest'): return None
-                raise AssertionError('Unexpected API lookup: ' + resource)
-            with self.subTest(group=group), patch.object(sources, 'github_json', side_effect=api):
+            with self.subTest(group=group), patch('approved_manager_builds.read_approved', return_value=channels), \
+                    patch.object(sources, 'github_json') as api:
                 receipt = selection.resolve_selection(group, '最新版', susfs=True)
+            api.assert_not_called()
             self.assertEqual(list(requested), receipt['active_managers'])
             self.assertEqual([], receipt['skipped_managers'])
 

@@ -3,6 +3,12 @@ import re
 
 
 HISTORY_CLEANUP_NAME = '清理历史记录（保留2条成功及发行记录）'
+MANUAL_SYNC = "github.event_name == 'workflow_dispatch' && inputs.operation == '同步官方更新'"
+UPSTREAM_SYNC_PATHS = ('data/kernels.json\ndata/upstream-candidates.json\n'
+                       'data/susfs-upstream-candidates.json\nbuild-compatibility.json\n'
+                       'config/manager-susfs-pins.json\nconfig/validated-manager-builds.json\n'
+                       'data/oplus-upstream-candidates.json\nconfig/oplus-cctv-profiles.json\n'
+                       'third_party/cctv-oplus/recipes/*.yml\n')
 
 
 def successful_cleanup_sweep_step():
@@ -133,11 +139,6 @@ PY
              'with': {'path': '${{ runner.temp }}/gki-manager-version-history',
                       'key': 'gki-manager-version-history-v1-${{ github.run_id }}-${{ github.run_attempt }}',
                       'restore-keys': 'gki-manager-version-history-v1-'}},
-            {'name': '检查更新分支归属和已有 PR', 'id': 'guard',
-             'if': "steps.probe.outputs.has_updates == 'true'",
-             'env': {'GH_TOKEN': '${{ github.token }}', 'HEADS_MARKER': '${{ steps.probe.outputs.heads_marker }}',
-                     'DEFAULT_BRANCH': '${{ github.event.repository.default_branch }}'},
-             'run': 'python3 tools/upstream_pr_guard.py --heads-marker "$HEADS_MARKER" --base "$DEFAULT_BRANCH" --github-output "$GITHUB_OUTPUT"'},
             {'name': '分别准备各来源，失败来源回滚', 'id': 'prepare-sources',
              'if': "steps.probe.outputs.has_updates == 'true'",
              'env': {'GH_TOKEN': '${{ github.token }}',
@@ -155,10 +156,22 @@ PY
                      'OPLUS_CANDIDATES': '${{ steps.oplus.outputs.candidates_json }}'},
              'run': ('python3 tools/prepare_source_updates.py --root . --report-dir "$RUNNER_TEMP" '
                      '--github-output "$GITHUB_OUTPUT"')},
+            {'name': '恢复管理器配套验证的官方源码缓存', 'uses': 'actions/cache/restore@v5',
+             'if': MANUAL_SYNC + " && steps.official.outcome == 'success'",
+             'continue-on-error': True,
+             'with': {'path': '${{ runner.temp }}/gki-manager-compatibility',
+                      'key': 'gki-manager-compatibility-v1-${{ github.run_id }}-${{ github.run_attempt }}',
+                      'restore-keys': 'gki-manager-compatibility-v1-'}},
+            {'name': '分别验证管理器版本并保留已有可用版本', 'id': 'manager-approval',
+             'if': MANUAL_SYNC + " && steps.official.outcome == 'success' && steps.prepare-sources.outputs.official_result != 'failure'",
+             'env': {'GH_TOKEN': '${{ github.token }}'},
+             'run': '''python3 tools/verify_manager_update.py --root . --sources data/upstream-candidates.json \\
+  --source-cache "$RUNNER_TEMP/gki-manager-compatibility" \\
+  --compatibility-report "$RUNNER_TEMP/manager-compatibility.json"
+'''},
             {'name': '汇总可用更新与待重试来源', 'id': 'update',
-             'if': "steps.probe.outputs.has_updates == 'true'",
+             'if': "steps.probe.outputs.has_updates == 'true' || steps.manager-approval.outputs.approved_changed == 'true'",
              'env': {'GH_TOKEN': '${{ github.token }}',
-                     'PREPARED_CHANGED': '${{ steps.prepare-sources.outputs.has_updates }}',
                      'PREPARED_PARTIAL': '${{ steps.prepare-sources.outputs.partial_failure }}',
                      'SUSFS_CHANGED': '${{ steps.susfs.outputs.has_updates }}',
                      'OPLUS_CHANGED': '${{ steps.oplus.outputs.has_updates }}',
@@ -167,10 +180,11 @@ PY
                      'SUSFS_CANDIDATES': '${{ steps.susfs.outputs.candidates_json }}',
                      'OPLUS_CANDIDATES': '${{ steps.oplus.outputs.candidates_json }}',
                      'HEADS_MARKER': '${{ steps.probe.outputs.heads_marker }}',
-                     'OFFICIAL_RESULT': '${{ steps.prepare-sources.outputs.official_result }}',
-                     'CATALOG_RESULT': '${{ steps.prepare-sources.outputs.catalog_result }}',
-                     'SUSFS_RESULT': '${{ steps.prepare-sources.outputs.susfs_result }}',
-                     'OPLUS_RESULT': '${{ steps.prepare-sources.outputs.oplus_result }}'},
+                     'SYNC_PATHS': UPSTREAM_SYNC_PATHS,
+                     'OFFICIAL_RESULT': '${{ steps.prepare-sources.outputs.official_result || steps.official.outcome }}',
+                     'CATALOG_RESULT': '${{ steps.prepare-sources.outputs.catalog_result || steps.catalog.outcome }}',
+                     'SUSFS_RESULT': '${{ steps.prepare-sources.outputs.susfs_result || steps.susfs.outcome }}',
+                     'OPLUS_RESULT': '${{ steps.prepare-sources.outputs.oplus_result || steps.oplus.outcome }}'},
              'run': '''set -euo pipefail
 python3 tools/official_sync_report.py --root . --base-ref HEAD \\
   --report-json "$RUNNER_TEMP/official-sync-report.json" \\
@@ -180,7 +194,7 @@ python3 tools/official_sync_report.py --root . --base-ref HEAD \\
   --official-result "$OFFICIAL_RESULT" --catalog-result "$CATALOG_RESULT" \\
   --susfs-result "$SUSFS_RESULT" --oplus-result "$OPLUS_RESULT"
 python3 - <<'PY'
-import hashlib,json,os,pathlib,sys
+import hashlib,json,os,pathlib,subprocess,sys
 sys.path.insert(0, 'tools')
 from official_sync_report import report_preview
 path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'official-update.md'
@@ -194,24 +208,37 @@ status = ('管理器/SUSFS 官方源：' + ('检查完成' if official_ok else '
           '；欧加真：' + ('检查完成' if oplus_ok else '检查失败，未确认有无更新'))
 if not (official_ok and catalog_ok and susfs_ok and oplus_ok):
     status += '。本次仅提交成功检查部分的候选；失败部分须重试，不能视为全部官方源已检查。'
-marker = os.environ['HEADS_MARKER']
+paths = os.environ['SYNC_PATHS'].splitlines()
+diff = subprocess.check_output(['git', 'diff', '--binary', 'HEAD', '--', *paths])
+added = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z', '--', *paths])
+marker_input = os.environ['HEADS_MARKER'].encode() + diff
+for name in filter(None, added.decode('utf-8').split('\\0')):
+    marker_input += name.encode() + hashlib.sha256(pathlib.Path(name).read_bytes()).digest()
 if os.environ['PREPARED_PARTIAL'] == 'true':
     # A partial PR must not masquerade as an already-prepared complete snapshot.
     # A later successful retry then refreshes that PR with its missing sources.
     state = [os.environ[name + '_RESULT'] for name in ('OFFICIAL', 'CATALOG', 'SUSFS', 'OPLUS')]
-    digest = hashlib.sha256((marker + json.dumps(state)).encode()).hexdigest()
-    marker = '<!-- gki-official-heads:sha256=' + digest + ' -->'
+    marker_input += json.dumps(state).encode()
+marker = '<!-- gki-official-heads:sha256=' + hashlib.sha256(marker_input).hexdigest() + ' -->'
 body = ('<!-- gki-upstream-sync:v1 -->\\n' + marker + '\\n\\n'
         '# 上游来源更新\\n\\n本 PR 跟踪六种管理器、SUSFS、Android GKI 和当前欧加真方案的对应来源。\\n\\n'
         + status + '\\n\\n'
-        '本 PR 只准备待同步的数据，不会因检查而自动合并。请在 Actions 的“检查并同步官方更新”中选择“同步官方更新”，完成管理器配套验证后再同步。新 APK 和内核仍需另外触发构建。\\n\\n'
+        '本 PR 只准备待同步的数据，不会因检查而自动合并。请在 Actions 的“检查并同步官方更新”中选择“同步官方更新”，同步通过配套校验的管理器版本和其它来源数据。\\n\\n'
         + report_preview((path.parent / 'official-sync-report.md').read_text(encoding='utf-8')))
+manager_report = path.parent / 'manager-compatibility.md'
+if manager_report.is_file():
+    body += '\\n\\n' + report_preview(manager_report.read_text(encoding='utf-8'))
 path.write_text(body,encoding='utf-8')
 with open(os.environ['GITHUB_OUTPUT'],'a') as output:
-    changed = os.environ['PREPARED_CHANGED'] == 'true'
-    output.write(f'has_updates={str(changed).lower()}\\nbody_path={path}\\ntitle=Update official sources and GKI kernel catalog\\n')
+    changed = bool(diff or added)
+    output.write(f'has_updates={str(changed).lower()}\\nbody_path={path}\\nheads_marker={marker}\\ntitle=Update official sources and GKI kernel catalog\\n')
 PY
 '''},
+            {'name': '检查更新分支归属和已有 PR', 'id': 'guard',
+             'if': "steps.update.outputs.has_updates == 'true'",
+             'env': {'GH_TOKEN': '${{ github.token }}', 'HEADS_MARKER': '${{ steps.update.outputs.heads_marker }}',
+                     'DEFAULT_BRANCH': '${{ github.event.repository.default_branch }}'},
+             'run': 'python3 tools/upstream_pr_guard.py --heads-marker "$HEADS_MARKER" --base "$DEFAULT_BRANCH" --github-output "$GITHUB_OUTPUT"'},
             {'name': '缓存管理器版本号的官方 Git 历史', 'uses': 'actions/cache/save@v5',
              'if': "always() && !cancelled() && steps.update.outcome == 'success'", 'continue-on-error': True,
              'with': {'path': '${{ runner.temp }}/gki-manager-version-history',
@@ -225,18 +252,9 @@ PY
                       'base': '${{ github.event.repository.default_branch }}',
                       'title': '${{ steps.update.outputs.title }}', 'body-path': '${{ steps.update.outputs.body_path }}',
                       'commit-message': 'Track official source updates and new GKI kernels',
-                      'add-paths': ('data/kernels.json\ndata/upstream-candidates.json\n'
-                                    'data/susfs-upstream-candidates.json\nbuild-compatibility.json\n'
-                                    'config/manager-susfs-pins.json\ndata/oplus-upstream-candidates.json\n'
-                                    'config/oplus-cctv-profiles.json\nthird_party/cctv-oplus/recipes/*.yml\n')}},
-            {'name': '恢复管理器配套验证的官方源码缓存', 'uses': 'actions/cache/restore@v5',
-             'if': "github.event_name == 'workflow_dispatch' && inputs.operation == '同步官方更新' && steps.probe.outputs.has_updates == 'true'",
-             'continue-on-error': True,
-             'with': {'path': '${{ runner.temp }}/gki-manager-compatibility',
-                      'key': 'gki-manager-compatibility-v1-${{ github.run_id }}-${{ github.run_attempt }}',
-                      'restore-keys': 'gki-manager-compatibility-v1-'}},
-            {'name': '验证正式版和测试版配套后执行手动同步', 'id': 'sync',
-             'if': "github.event_name == 'workflow_dispatch' && inputs.operation == '同步官方更新' && steps.probe.outputs.has_updates == 'true' && steps.probe.outputs.partial_failure != 'true' && steps.prepare-sources.outputs.partial_failure == 'false' && (steps.pr.outputs.pull-request-number != '' || steps.guard.outputs.already_pending == 'true')",
+                      'add-paths': UPSTREAM_SYNC_PATHS}},
+            {'name': '复核候选提交并执行手动同步', 'id': 'sync',
+             'if': MANUAL_SYNC + " && steps.update.outputs.has_updates == 'true' && steps.probe.outputs.partial_failure != 'true' && steps.prepare-sources.outputs.partial_failure != 'true' && (steps.pr.outputs.pull-request-number != '' || steps.guard.outputs.already_pending == 'true')",
              'env': {'GH_TOKEN': '${{ secrets.UPSTREAM_SYNC_TOKEN }}',
                      'CREATED_PR_NUMBER': '${{ steps.pr.outputs.pull-request-number }}',
                      'EXISTING_PR_URL': '${{ steps.guard.outputs.pull_request_url }}',
@@ -245,10 +263,10 @@ PY
 number="${CREATED_PR_NUMBER:-${EXISTING_PR_URL##*/}}"
 python3 tools/auto_merge_official_update.py --pull-request "$number" --base "$DEFAULT_BRANCH" \\
   --source-cache "$RUNNER_TEMP/gki-manager-compatibility" \\
-  --compatibility-report "$RUNNER_TEMP/manager-compatibility.json"
+  --compatibility-report "$RUNNER_TEMP/manager-merge-compatibility.json"
 '''},
             {'name': '保存管理器配套验证的官方源码缓存', 'uses': 'actions/cache/save@v5',
-             'if': "always() && !cancelled() && steps.sync.outcome != 'skipped'", 'continue-on-error': True,
+             'if': "always() && !cancelled() && steps.manager-approval.outcome != 'skipped'", 'continue-on-error': True,
              'with': {'path': '${{ runner.temp }}/gki-manager-compatibility',
                       'key': 'gki-manager-compatibility-v1-${{ github.run_id }}-${{ github.run_attempt }}'}},
             {'name': '仅发送待手动同步的更新提醒', 'id': 'notify',
@@ -265,7 +283,8 @@ python3 tools/auto_merge_official_update.py --pull-request "$number" --base "$DE
              'env': {'PR_URL': '${{ steps.sync.outputs.pull_request_url || steps.pr.outputs.pull-request-url }}',
                      'SYNC_MERGED': '${{ steps.sync.outputs.merged }}',
                      'SYNC_COMMIT': '${{ steps.sync.outputs.merge_commit }}',
-                     'HAS_UPDATES': '${{ steps.probe.outputs.has_updates }}',
+                     'HAS_UPDATES': '${{ steps.update.outputs.has_updates || steps.probe.outputs.has_updates }}',
+                     'PENDING_MANAGERS': '${{ steps.manager-approval.outputs.pending_slots }}',
                      'EXISTING_PR': '${{ steps.guard.outputs.pull_request_url }}',
                      'OFFICIAL_RESULT': '${{ steps.prepare-sources.outputs.official_result || steps.official.outcome }}',
                      'CATALOG_RESULT': '${{ steps.prepare-sources.outputs.catalog_result || steps.catalog.outcome }}',
@@ -277,6 +296,8 @@ elif [ -n "$PR_URL" ]; then
   printf '已发现官方更新，等待你手动同步：%s\\n' "$PR_URL" >> "$GITHUB_STEP_SUMMARY"
 elif [ -n "$EXISTING_PR" ]; then
   printf '官方更新仍待同步，请查看校验或合并步骤：%s\\n' "$EXISTING_PR" >> "$GITHUB_STEP_SUMMARY"
+elif [ -n "$PENDING_MANAGERS" ] && [ "$PENDING_MANAGERS" != 0 ]; then
+  printf '有 %s 个管理器版本仍待适配，继续使用已验证的版本。\\n' "$PENDING_MANAGERS" >> "$GITHUB_STEP_SUMMARY"
 elif [ "$OFFICIAL_RESULT" = success ] && [ "$CATALOG_RESULT" = success ] && [ "$SUSFS_RESULT" = success ] && [ "$OPLUS_RESULT" = success ] && [ "$HAS_UPDATES" = false ]; then
   echo '未发现新的管理器、SUSFS、GKI 或欧加真来源更新。' >> "$GITHUB_STEP_SUMMARY"
 elif [ "$HAS_UPDATES" = true ]; then
@@ -289,6 +310,10 @@ fi
 if [ -f "$RUNNER_TEMP/manager-compatibility.md" ]; then
   printf '\\n' >> "$GITHUB_STEP_SUMMARY"
   cat "$RUNNER_TEMP/manager-compatibility.md" >> "$GITHUB_STEP_SUMMARY"
+fi
+if [ -f "$RUNNER_TEMP/manager-merge-compatibility.md" ]; then
+  printf '\\n' >> "$GITHUB_STEP_SUMMARY"
+  cat "$RUNNER_TEMP/manager-merge-compatibility.md" >> "$GITHUB_STEP_SUMMARY"
 fi
 if [ -f "$RUNNER_TEMP/source-preparation.md" ]; then
   cat "$RUNNER_TEMP/source-preparation.md" >> "$GITHUB_STEP_SUMMARY"

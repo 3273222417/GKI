@@ -23,7 +23,8 @@ from resolve_build_sources import SourceResolutionError
 from snapshot_ksu_source import temporary_directory
 from upstream_pr_guard import (BRANCH, HEADS_MARKER_PATTERN, NoRedirect, GuardError,
                                _owned_pr, validate_base, validate_repository)
-from verify_manager_update import validate_manager_snapshot, ManagerUpdateError
+from verify_manager_update import (APPROVED_PATH, ManagerUpdateError, render_report,
+                                   validate_approved_changes, validate_manager_snapshot)
 from manager_variants import MANAGERS
 
 PROFILE = 'build-compatibility.json'
@@ -36,7 +37,7 @@ OPLUS_RECEIPT = 'data/oplus-upstream-candidates.json'
 from update_oplus_sources import allowed_paths as oplus_allowed_paths, UpdateError as OplusSourceUpdateError
 from update_susfs_sources import SusfsUpdateError
 FILES = frozenset(('data/kernels.json', 'data/upstream-candidates.json',
-                   PROFILE, SUSFS_RECEIPT, MANAGER_PINS,
+                    APPROVED_PATH, PROFILE, SUSFS_RECEIPT, MANAGER_PINS,
                    *oplus_allowed_paths(json.loads((Path(__file__).resolve().parents[1] / OPLUS_PROFILES).read_text(encoding='utf-8')))))
 SHA = re.compile(r'[0-9a-f]{40}\Z')
 MAX_FILE = 512 * 1024
@@ -265,12 +266,18 @@ def skipped_manager_report(path: Path | None):
     for target in (path, markdown):
         if target.is_symlink() or target.exists() and not target.is_file():
             raise MergeError('Compatibility report must be a regular output file')
-    reason = '管理器源码与 SUSFS 实际构建引用未变化，本次不重复运行管理器配套验证。'
+    reason = '已验证管理器源码与 SUSFS 实际构建引用未变化，本次不重复运行管理器配套验证。'
     report = {'schema_version': 1, 'status': 'skipped', 'reason': reason, 'rows': []}
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
     markdown.write_text('### 同步配套验证\n\n' + reason
                         + '\n\n本次仍执行所更新来源的数据、远端引用及合并校验；跳过不代表重新验证通过。'
                         + '\n本次没有编译 APK 或内核。\n', encoding='utf-8', newline='\n')
+
+
+def approved_manager_report(path, report):
+    if path is not None and report['rows']:
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
+        path.with_suffix('.md').write_text(render_report(report), encoding='utf-8', newline='\n')
 
 
 def sync(repository: str, number: int, base: str, api, *, source_cache: Path | None = None,
@@ -340,7 +347,7 @@ def sync(repository: str, number: int, base: str, api, *, source_cache: Path | N
             new_manager_pins=document(MANAGER_PINS, head),
             expected_sources=document('data/upstream-candidates.json', head)['sources']
                              if 'data/upstream-candidates.json' in pr_files else None)
-    oplus_files = set(FILES) - {'data/kernels.json', 'data/upstream-candidates.json', *susfs_files}
+    oplus_files = set(FILES) - {'data/kernels.json', 'data/upstream-candidates.json', APPROVED_PATH, *susfs_files}
     if pr_files.keys() & oplus_files:
         if OPLUS_RECEIPT not in pr_files:
             raise MergeError('Oplus source/recipe changes require the matching verified source receipt')
@@ -375,7 +382,28 @@ def sync(repository: str, number: int, base: str, api, *, source_cache: Path | N
         from update_susfs_sources import configured_pins
         pins_changed = (configured_pins(document(PROFILE, current_base), document(MANAGER_PINS, current_base))
                         != configured_pins(document(PROFILE, head), document(MANAGER_PINS, head)))
-    if managers_changed or pins_changed:
+    approved = document(APPROVED_PATH, current_base, missing=True)
+    if approved is not None:
+        from approved_manager_builds import validate_approved
+        channels = validate_approved(approved)
+        if APPROVED_PATH in pr_files or pins_changed:
+            from update_susfs_sources import configured_pins
+            new_channels = validate_approved(document(APPROVED_PATH, head)) if APPROVED_PATH in pr_files else channels
+            if APPROVED_PATH in pr_files and new_channels == channels:
+                raise MergeError('Approved manager manifest does not advance any channel')
+            observation = candidate or document('data/upstream-candidates.json', current_base, missing=True)
+            old_pins = configured_pins(document(PROFILE, current_base), document(MANAGER_PINS, current_base))
+            new_pins = (configured_pins(document(PROFILE, head), document(MANAGER_PINS, head))
+                        if pins_changed else old_pins)
+            report = validate_approved_changes(channels, new_channels, observation['sources'] if observation else None,
+                cache=source_cache or Path.cwd() / '.gki-manager-compatibility',
+                before_pins=old_pins, proposed_pins=new_pins)
+            approved_manager_report(compatibility_report, report)
+        else:
+            skipped_manager_report(compatibility_report)
+    elif APPROVED_PATH in pr_files:
+        raise MergeError('Initialize the approved manager manifest on the default branch first')
+    elif managers_changed or pins_changed:
         from update_susfs_sources import configured_pins
         candidate = candidate or document('data/upstream-candidates.json', head)
         previous = previous or document('data/upstream-candidates.json', current_base, missing=True)

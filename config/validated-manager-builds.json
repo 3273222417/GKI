@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "channels": {
+    "SukiSU": {
+      "Stable(标准)": {
+        "reference": "645ef9860b9b7f900bb5d1b27e224f2c311d39c0",
+        "source_branch": "v4.3.0-r2"
+      },
+      "Latest(最新)": {
+        "reference": "dae36db016079546b9fc028636a3326d09979777",
+        "source_branch": "main"
+      }
+    },
+    "BakaSU": {
+      "Latest(最新)": {
+        "reference": "548d1dda060ca198823d8808804d01f5209ef4a9",
+        "source_branch": "main"
+      }
+    },
+    "KernelSU-Next": {
+      "Stable(标准)": {
+        "reference": "4c706b5938665866ebe16944a481a7b91e3396af",
+        "source_branch": "v3.4.2"
+      },
+      "Latest(最新)": {
+        "reference": "3987e4d5de21348050b923e7d7a6540ddc2d5c8c",
+        "source_branch": "dev"
+      }
+    },
+    "KernelSU": {
+      "Stable(标准)": {
+        "reference": "0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d",
+        "source_branch": "v3.3.1"
+      },
+      "Latest(最新)": {
+        "reference": "dbb73665d103da40c7ecbd21ba3b5ac76eb95784",
+        "source_branch": "main"
+      }
+    },
+    "KowSU": {
+      "Latest(最新)": {
+        "reference": "21787ce135c988bae4244a44cfcb5a542aa3347f",
+        "source_branch": "master"
+      }
+    },
+    "FinaSU": {
+      "Stable(标准)": {
+        "reference": "14a71d953a09e0d706426a17be0f4b422893ab26",
+        "source_branch": "v1.6.1"
+      },
+      "Latest(最新)": {
+        "reference": "14a71d953a09e0d706426a17be0f4b422893ab26",
+        "source_branch": "master"
+      }
+    }
+  }
+}
