@@ -7,6 +7,34 @@ source_dir="$(cd "$source_dir" && pwd -P)"
 cd "$source_dir"
 abis=$(python3 "$tools_dir/manager_full_native.py" abis --source "$source_dir")
 export CARGO_TARGET_DIR="$source_dir/target"
+if [ "$KSU_VARIANT" = SukiSU ]; then
+  # Upstream can remove a dependency without pruning all of its transitive
+  # packages from Cargo.lock. Reconcile the workspace once, then build locked.
+  python3 - <<'PY'
+from pathlib import Path
+import subprocess
+import tomllib
+
+def packages(document):
+    return {(p['name'], p['version'], p.get('source'), p.get('checksum')) for p in document['package']}
+
+lock = Path('Cargo.lock')
+original = lock.read_bytes()
+before = tomllib.loads(original.decode('utf-8'))
+try:
+    subprocess.run(['cargo', 'metadata', '--format-version', '1', '--filter-platform',
+                    'aarch64-linux-android'], stdout=subprocess.DEVNULL, check=True)
+    current = lock.read_bytes()
+    if current != original:
+        after = tomllib.loads(current.decode('utf-8'))
+        if after['version'] != before['version'] or not packages(after) <= packages(before):
+            raise ValueError('SukiSU Cargo.lock requires an unpinned dependency or lock format change')
+        print('Reconciled SukiSU Cargo.lock with the official workspace; all retained dependencies stay pinned.')
+except Exception:
+    lock.write_bytes(original)
+    raise
+PY
+fi
 for abi in $abis; do
   (
     # Keep NDK/compiler variables local to this architecture and away from AGP.

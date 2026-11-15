@@ -141,6 +141,19 @@ def manager_ui_plan(source: Path, reference: str, variant: str) -> dict[str, byt
                 '            it != BottomBarDestination.Kpm || kpmAuthorized\n'
                 '        }\n'
                 '    }')
+            preview = java + '/ui/themepreview/ThemePreviewActivity.kt'
+            if preview in files:
+                # The preview supplies a synthetic privileged capability state.
+                # Keep the live KPM page out of that read-only pager.
+                preview_text = replace_one(read(preview),
+                    '    val destinations = remember { BottomBarDestination.entries }',
+                    '    val destinations = remember {\n'
+                    '        BottomBarDestination.entries.filterNot { it == BottomBarDestination.Kpm }\n'
+                    '    }')
+                preview_text = replace_one(preview_text, '                                when (destinations[page]) {\n',
+                    '                                when (destinations[page]) {\n'
+                    '                                    BottomBarDestination.Kpm -> Unit\n')
+                put(preview, preview_text)
         if 'BottomBarDestination.SuperUser ->' in text:
             text = replace_one(text, '                        BottomBarDestination.SuperUser ->',
                 '                        BottomBarDestination.Kpm -> ' + namespace + '.ui.kpm.GkiKpmScreen()\n'

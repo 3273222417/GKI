@@ -99,6 +99,7 @@ class AdditionalKpmTests(unittest.TestCase):
                     java + '/ui/util/KsuCli.kt': 'fun getRootShell() = nativeShell()\n',
                     java + '/ui/component/bottombar/BottomBarMiuix.kt': navigation,
                     'manager/app/src/main/res/values/strings.xml': '<resources></resources>'}
+                preview = java + '/ui/themepreview/ThemePreviewActivity.kt'
                 if indexed:
                     files[java + '/ui/viewmodel/MainActivityViewModel.kt'] = 'const val PAGE_COUNT = 4\n'
                     for name in ('BottomBarMaterial.kt', 'NavigationRailMaterial.kt'):
@@ -108,6 +109,13 @@ class AdditionalKpmTests(unittest.TestCase):
                             '    val items = listOf(\n'
                             '        Triple(R.string.superuser, Icons.Filled.Shield, Icons.Outlined.Shield),\n'
                             '    )\n')
+                else:
+                    files[preview] = (
+                        '    val destinations = remember { BottomBarDestination.entries }\n'
+                        '                                when (destinations[page]) {\n'
+                        '                                    BottomBarDestination.Home -> HomePager()\n'
+                        '                                    BottomBarDestination.SuperUser -> SuperUserPager()\n'
+                        '                                }\n')
 
                 def git_output(args, **kwargs):
                     return '\n'.join(files) if 'ls-tree' in args else files[args[-1].split(':', 1)[1]].encode()
@@ -126,6 +134,13 @@ class AdditionalKpmTests(unittest.TestCase):
                     activity = plan[java + '/ui/MainActivity.kt'].decode()
                     for index, page in ((2, 'SuperUserPager'), (3, 'ModulePager'), (4, 'SettingPager')):
                         self.assertIn(str(index) + ' -> ' + page + '()', activity)
+                else:
+                    preview_text = plan[preview].decode()
+                    self.assertIn('BottomBarDestination.entries.filterNot { it == BottomBarDestination.Kpm }', preview_text)
+                    self.assertIn('BottomBarDestination.Kpm -> Unit', preview_text)
+                    self.assertIn('BottomBarDestination.Home -> HomePager()', preview_text)
+                    self.assertIn('BottomBarDestination.SuperUser -> SuperUserPager()', preview_text)
+                    self.assertNotIn('GkiKpmScreen()', preview_text)
 
 
 if __name__ == '__main__':
