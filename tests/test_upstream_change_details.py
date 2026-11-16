@@ -43,7 +43,8 @@ class CommitDetailsTests(unittest.TestCase):
         with patch.dict(os.environ, {'GH_TOKEN': 'private-test-token'}):
             github = details.comparison_request('SukiSU', OLD, NEW)
             gitlab = details.comparison_request('SUSFS', OLD, NEW)
-        self.assertIn('/compare/' + OLD + '...' + NEW, github.full_url)
+        self.assertEqual('https://api.github.com/repositories/957055748/compare/'
+                         + OLD + '...' + NEW + '?per_page=8&page=1', github.full_url)
         self.assertEqual('Bearer private-test-token', github.get_header('Authorization'))
         self.assertNotIn('Authorization', gitlab.headers)
         self.assertIn('from=' + OLD + '&to=' + NEW + '&straight=true', gitlab.full_url)

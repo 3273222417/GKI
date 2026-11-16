@@ -10,6 +10,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from manager_variants import MANAGERS, manager_profile
+from resolve_build_sources import github_repository_api
 
 SHA = re.compile(r'[0-9a-f]{40}\Z')
 SUSFS = 'simonpunk/susfs4ksu'
@@ -55,7 +56,7 @@ def comparison_request(source: str, before: str, after: str) -> Request:
         url = ('https://gitlab.com/api/v4/projects/' + quote(SUSFS, safe='')
                + '/repository/compare?' + urlencode({'from': before, 'to': after, 'straight': 'true'}))
     else:
-        url = ('https://api.github.com/repos/' + manager_profile(source)['repository']
+        url = (github_repository_api(manager_profile(source)['repository'])
                + '/compare/' + before + '...' + after + '?per_page=8&page=1')
         token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
         if token:

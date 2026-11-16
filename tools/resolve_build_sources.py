@@ -23,6 +23,10 @@ REPOSITORIES = {
     "KowSU": "KOWX712/KernelSU",
     "FinaSU": "LyraVoid/FinaSU",
 }
+# GitHub keeps the numeric repository ID across renames. Keep the historical
+# source name in build receipts while querying the renamed repository directly.
+SUKISU_REPOSITORY_ID = 957055748
+SUKISU_CURRENT_NAME = "SukiSU-Nova/SukiSU-Nova"
 TIER_ALIASES = {
     "正式版": "Stable(标准)", "最新版": "Latest(最新)",
     # Preserve older workflow_dispatch payloads without exposing these labels
@@ -71,13 +75,20 @@ class NoRedirect(HTTPRedirectHandler):
         raise SourceResolutionError("GitHub source lookup redirects are not permitted")
 
 
-def github_json(repository: str, resource: str = "", *, missing: bool = False) -> dict | None:
-    """Read an allowlisted official repository API without following redirects."""
+def github_repository_api(repository: str) -> str:
     if repository not in REPOSITORIES.values():
         raise SourceResolutionError("KernelSU repository is not allowlisted")
+    if repository == REPOSITORIES['SukiSU']:
+        return f"https://api.github.com/repositories/{SUKISU_REPOSITORY_ID}"
+    return f"https://api.github.com/repos/{repository}"
+
+
+def github_json(repository: str, resource: str = "", *, missing: bool = False) -> dict | None:
+    """Read an allowlisted official repository API without following redirects."""
+    base_url = github_repository_api(repository)
     if resource and (not resource.startswith('/') or any(char in resource for char in ('\r', '\n', '#'))):
         raise SourceResolutionError("Invalid official GitHub API resource")
-    url = f"https://api.github.com/repos/{repository}{resource}"
+    url = base_url + resource
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "gki-source-resolver"}
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
@@ -104,6 +115,9 @@ def github_json(repository: str, resource: str = "", *, missing: bool = False) -
         raise SourceResolutionError("GitHub source lookup failed") from error
     if not isinstance(document, dict):
         raise SourceResolutionError("Official GitHub source lookup did not return an object")
+    if not resource and repository == REPOSITORIES['SukiSU']:
+        if type(document.get('id')) is not int or document['id'] != SUKISU_REPOSITORY_ID:
+            raise SourceResolutionError('Official SukiSU repository ID does not match the pinned source')
     return document
 
 
@@ -173,7 +187,10 @@ def compare_sukisu_channels(repository: str, branch: str, main_commit: str,
     base = comparison.get('base_commit')
     ahead, behind, total = (comparison.get(key) for key in ('ahead_by', 'behind_by', 'total_commits'))
     status = comparison.get('status')
-    if (comparison.get('url') != 'https://api.github.com/repos/' + repository + path
+    comparison_urls = {github_repository_api(repository) + path,
+                       'https://api.github.com/repos/' + repository + path,
+                       'https://api.github.com/repos/' + SUKISU_CURRENT_NAME + path}
+    if (not isinstance(comparison.get('url'), str) or comparison['url'] not in comparison_urls
             or not isinstance(base, dict) or base.get('sha') != main_commit
             or any(type(count) is not int or not 0 <= count <= 2147483647 for count in (ahead, behind, total))
             or total != ahead
@@ -182,6 +199,18 @@ def compare_sukisu_channels(repository: str, branch: str, main_commit: str,
                     or (status == 'diverged' and ahead > 0 and behind > 0))):
         raise SourceResolutionError('Official main/dev comparison identity or history counts are invalid')
     return (dev_commit, 'dev') if ahead > behind else (main_commit, branch)
+
+
+def official_repository_identity(document, repository: str) -> bool:
+    if not isinstance(document, dict):
+        return False
+    if repository == REPOSITORIES['SukiSU'] and 'id' in document:
+        return type(document['id']) is int and document['id'] == SUKISU_REPOSITORY_ID
+    names = [repository.casefold()]
+    if repository == REPOSITORIES['SukiSU']:
+        names.append(SUKISU_CURRENT_NAME.casefold())
+    name = document.get('full_name')
+    return isinstance(name, str) and name.casefold() in names
 
 
 def official_selection(repository: str, tier: str, custom_ref: str) -> tuple[str, str]:
@@ -202,10 +231,8 @@ def official_selection(repository: str, tier: str, custom_ref: str) -> tuple[str
                 or not isinstance(selected.get('head_sha'), str) or not SHA.fullmatch(selected['head_sha'])):
             raise SourceResolutionError('Custom branch:N requires the Nth successful official build-manager.yml run; none was found')
         head_repository = selected.get('head_repository')
-        if head_repository is not None:
-            name = head_repository.get('full_name') if isinstance(head_repository, dict) else None
-            if not isinstance(name, str) or name.casefold() != repository.casefold():
-                raise SourceResolutionError('Custom workflow run did not originate in the selected official repository')
+        if head_repository is not None and not official_repository_identity(head_repository, repository):
+            raise SourceResolutionError('Custom workflow run did not originate in the selected official repository')
         return selected['head_sha'].lower(), branch
     if tier == 'Stable(标准)':
         release = github_json(repository, '/releases/latest', missing=True)
@@ -214,8 +241,7 @@ def official_selection(repository: str, tier: str, custom_ref: str) -> tuple[str
             # repository. Only a readable, identified official repository can
             # be classified as having no stable release.
             identity = github_json(repository)
-            full_name = identity.get('full_name') if isinstance(identity, dict) else None
-            if not isinstance(full_name, str) or full_name.casefold() != repository.casefold():
+            if not official_repository_identity(identity, repository):
                 raise SourceResolutionError('正式版查询无法确认官方仓库身份')
             raise NoStableRelease('Official Stable has no published release; 官方尚未发布正式版，请选择“最新版”。候选版不会作为正式版。')
         tag = release.get('tag_name')

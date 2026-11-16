@@ -19,6 +19,7 @@ from manager_variants import MANAGERS
 KSU = 'c' * 40
 NEW_KSU = 'd' * 40
 REPO = 'SukiSU-Ultra/SukiSU-Ultra'
+REPO_API = 'https://api.github.com/repositories/957055748'
 BAKA_REPO = 'Baka-SU/BakaSU'
 PROFILE = {'schema_version': 1, 'sukisu_susfs': {
     'ksu_commits': [KSU], 'tiers': ['Stable(标准)', 'Dev(开发)'],
@@ -215,6 +216,12 @@ class BuildSourceTests(unittest.TestCase):
             self.assertEqual(default, result['ksu_source_branch'])
             self.assertEqual(count, api.call_count)
 
+    def test_sukisu_comparison_accepts_the_renamed_official_url(self):
+        response = self.comparison()
+        response['url'] = f'https://api.github.com/repos/SukiSU-Nova/SukiSU-Nova/compare/{KSU}...{NEW_KSU}'
+        with patch.object(sources, 'github_json', return_value=response):
+            self.assertEqual((NEW_KSU, 'dev'), sources.compare_sukisu_channels(REPO, 'main', KSU, NEW_KSU))
+
     def test_sukisu_latest_rejects_wrong_branch_invalid_commit_or_comparison(self):
         for development in ({'name': 'feature', 'commit': {'sha': NEW_KSU}},
                             {'name': 'dev', 'commit': {'sha': 'main'}},
@@ -387,7 +394,7 @@ class GitHubSourceLookupTests(unittest.TestCase):
         response = MagicMock()
         response.__enter__.return_value = response
         response.status = 200
-        response.geturl.return_value = f'https://api.github.com/repos/{REPO}/commits/feature%2Fmanager'
+        response.geturl.return_value = REPO_API + '/commits/feature%2Fmanager'
         response.read.return_value = json.dumps({'sha': sha}).encode()
         opener = MagicMock()
         opener.open.return_value = response
@@ -399,10 +406,23 @@ class GitHubSourceLookupTests(unittest.TestCase):
             with patch.object(sources, 'build_opener', return_value=opener) as build:
                 self.assertEqual(sources.github_commit(REPO, 'feature/manager'), NEW_KSU)
         request, = opener.open.call_args.args
-        self.assertEqual(request.full_url, f'https://api.github.com/repos/{REPO}/commits/feature%2Fmanager')
+        self.assertEqual(request.full_url, REPO_API + '/commits/feature%2Fmanager')
         self.assertEqual(request.get_method(), 'GET')
         self.assertEqual(request.get_header('Authorization'), 'Bearer private-token')
         self.assertIsInstance(build.call_args.args[0], sources.NoRedirect)
+
+    def test_sukisu_metadata_uses_the_pinned_identity_after_a_rename(self):
+        response, opener = self.api_response()
+        response.geturl.return_value = REPO_API
+        body = {'id': 957055748, 'full_name': 'SukiSU-Nova/SukiSU-Nova', 'default_branch': 'main'}
+        with patch.object(sources, 'build_opener', return_value=opener):
+            response.read.return_value = json.dumps(body).encode()
+            self.assertEqual(sources.default_branch(REPO), 'main')
+            self.assertEqual(opener.open.call_args.args[0].full_url, REPO_API)
+            body['id'] = 1
+            response.read.return_value = json.dumps(body).encode()
+            with self.assertRaisesRegex(sources.SourceResolutionError, 'repository ID'):
+                sources.default_branch(REPO)
 
     def test_no_token_means_no_authorization_header(self):
         _, opener = self.api_response()
