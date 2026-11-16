@@ -27,6 +27,9 @@ from kpm_payload_profiles import KPMProfileError, load_bridge_release, resolve_p
 ROOT = Path(__file__).resolve().parents[1]
 MAGIC = b'KP1158\0\0'
 REPOSITORY = 'SukiSU-Ultra/SukiSU_KernelPatch_patch'
+# Keep the original repository name in the release locks and build receipts.
+DOWNLOAD_REPOSITORY = 'SukiSU-Nova/SukiSU_KernelPatch_patch'
+DOWNLOAD_API_PREFIX = 'https://api.github.com/repos/' + DOWNLOAD_REPOSITORY
 COMMIT = '72bf62025e9c72e07b64c77db0801891f1088429'
 TAG = '0.13.9'
 PAGE = 4096
@@ -211,12 +214,15 @@ def _fixed_download_lock(url: str, size: int):
     return release, name
 
 
+def _release_download_url(tag: str, name: str) -> str:
+    return f'https://github.com/{DOWNLOAD_REPOSITORY}/releases/download/{tag}/{name}'
+
+
 def _asset_api_url(release: dict, name: str, opener) -> str:
-    prefix = 'https://api.github.com/repos/' + REPOSITORY
     tag = release['tag']
     if tag not in (TAG, '0.14.0') or name not in ('kpimg', 'kptools-linux'):
         raise KPMValidationError('Unknown fixed official KPM API asset')
-    url = prefix + '/releases/tags/' + tag
+    url = DOWNLOAD_API_PREFIX + '/releases/tags/' + tag
     request = urllib.request.Request(url, headers=_api_headers('application/vnd.github+json'))
     try:
         response = opener.open(request, timeout=45)
@@ -251,7 +257,7 @@ def _asset_api_url(release: dict, name: str, opener) -> str:
         raise KPMValidationError('Official KPM release metadata is not valid JSON') from None
     if (not isinstance(metadata, dict) or metadata.get('tag_name') != tag
             or metadata.get('draft') is not False or metadata.get('prerelease') is not False
-            or metadata.get('html_url') != f'https://github.com/{REPOSITORY}/releases/tag/{tag}'
+            or metadata.get('html_url') != f'https://github.com/{DOWNLOAD_REPOSITORY}/releases/tag/{tag}'
             or not isinstance(metadata.get('assets'), list) or len(metadata['assets']) > 1000
             or any(not isinstance(item, dict) for item in metadata['assets'])):
         raise KPMValidationError('Official KPM API returned an unexpected release identity')
@@ -261,18 +267,20 @@ def _asset_api_url(release: dict, name: str, opener) -> str:
         raise KPMValidationError('Official KPM API did not identify exactly one locked asset')
     asset = assets[0]
     identifier = asset.get('id')
-    if (type(identifier) is not int or not 1 <= identifier <= 9223372036854775807
-            or type(asset.get('size')) is not int or asset['size'] != spec['size']
-            or asset.get('state') != 'uploaded' or asset.get('browser_download_url') != spec['url']
-            or asset.get('url') != prefix + '/releases/assets/' + str(identifier)
+    if type(identifier) is not int or not 1 <= identifier <= 9223372036854775807:
+        raise KPMValidationError('Official KPM API asset differs from its immutable size/URL/digest lock')
+    api_url = DOWNLOAD_API_PREFIX + '/releases/assets/' + str(identifier)
+    if (type(asset.get('size')) is not int or asset['size'] != spec['size']
+            or asset.get('state') != 'uploaded' or asset.get('browser_download_url') != _release_download_url(tag, name)
+            or asset.get('url') != api_url
             or asset.get('digest') not in (None, 'sha256:' + spec['sha256'])):
         raise KPMValidationError('Official KPM API asset differs from its immutable size/URL/digest lock')
-    return prefix + '/releases/assets/' + str(identifier)
+    return api_url
 
 
 def _download_attempt(url: str, size: int, opener, *, fresh=False, api_entry=None) -> bytes:
-    if api_entry is not None and not re.fullmatch(r'https://api\.github\.com/repos/'
-            + re.escape(REPOSITORY) + r'/releases/assets/[1-9][0-9]{0,18}', api_entry):
+    if api_entry is not None and not re.fullmatch(
+            re.escape(DOWNLOAD_API_PREFIX) + r'/releases/assets/[1-9][0-9]{0,18}', api_entry):
         raise KPMValidationError('Unexpected official KPM asset API destination')
     for _ in range(4):
         # Every hop gets a new Request. The token is used on this one verified
@@ -329,6 +337,9 @@ def download(url: str, size: int) -> bytes:
         label = tag + '/' + label
     opener = urllib.request.build_opener(_NoRedirect())
     locked = _fixed_download_lock(url, size)
+    if locked is not None:
+        release, name = locked
+        url = _release_download_url(release['tag'], name)
     for attempt in range(4):
         reason, retry_after = None, None
         api_fallback = attempt > 0 and locked is not None

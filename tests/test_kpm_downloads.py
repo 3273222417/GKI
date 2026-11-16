@@ -18,9 +18,10 @@ sys.path.insert(0, str(ROOT / 'tools'))
 import apply_kpm_patch as kpm
 
 URL = f'https://github.com/{kpm.REPOSITORY}/releases/download/{kpm.TAG}/kpimg'
+CANONICAL_URL = f'https://github.com/{kpm.DOWNLOAD_REPOSITORY}/releases/download/{kpm.TAG}/kpimg'
 CDN = 'https://release-assets.githubusercontent.com/public?signature=do-not-log'
-METADATA_URL = f'https://api.github.com/repos/{kpm.REPOSITORY}/releases/tags/{kpm.TAG}'
-ASSET_URL = f'https://api.github.com/repos/{kpm.REPOSITORY}/releases/assets/777'
+METADATA_URL = f'https://api.github.com/repos/{kpm.DOWNLOAD_REPOSITORY}/releases/tags/{kpm.TAG}'
+ASSET_URL = f'https://api.github.com/repos/{kpm.DOWNLOAD_REPOSITORY}/releases/assets/777'
 
 
 def response(data=b'validated elsewhere'):
@@ -133,6 +134,22 @@ class KPMDownloadTests(unittest.TestCase):
             kpm.download(URL, len(b'validated elsewhere'))
         self.assertEqual(4, self.opener.open.call_count)
 
+    def test_actual_locks_use_canonical_download_urls_and_preserve_receipts(self):
+        for release in (kpm.load_release(), kpm.load_bridge_release()):
+            for name, asset in release['assets'].items():
+                with self.subTest(tag=release['tag'], asset=name):
+                    self.opener.reset_mock()
+                    self.opener.open.side_effect = [response(bytes(asset['size']))]
+                    with mock.patch.dict(os.environ, {'GH_TOKEN': 'read-token-must-not-leak'}):
+                        kpm.download(asset['url'], asset['size'])
+                    request = self.opener.open.call_args.args[0]
+                    self.assertEqual(
+                        f'https://github.com/{kpm.DOWNLOAD_REPOSITORY}/releases/download/{release["tag"]}/{name}',
+                        request.full_url)
+                    self.assertIn(kpm.REPOSITORY, asset['url'])
+                    self.assertEqual(kpm.REPOSITORY, release['repository'])
+                    self.assertIsNone(request.get_header('Authorization'))
+
 
 class KPMAssetApiRecoveryTests(unittest.TestCase):
     def setUp(self):
@@ -140,10 +157,10 @@ class KPMAssetApiRecoveryTests(unittest.TestCase):
         self.lock = copy.deepcopy(kpm.load_release())
         self.lock['assets']['kpimg'].update(size=len(self.payload), sha256=kpm.digest(self.payload))
         self.metadata = {'tag_name': kpm.TAG, 'draft': False, 'prerelease': False,
-            'html_url': f'https://github.com/{kpm.REPOSITORY}/releases/tag/{kpm.TAG}',
+            'html_url': f'https://github.com/{kpm.DOWNLOAD_REPOSITORY}/releases/tag/{kpm.TAG}',
             'assets': [{'id': 777, 'url': ASSET_URL, 'name': 'kpimg', 'size': len(self.payload),
                         'state': 'uploaded', 'digest': 'sha256:' + kpm.digest(self.payload),
-                        'browser_download_url': URL}]}
+                        'browser_download_url': CANONICAL_URL}]}
         self.opener = mock.Mock()
         for target, value in ((mock.patch.object(kpm, 'load_release'), self.lock),
                               (mock.patch.object(kpm.urllib.request, 'build_opener'), self.opener)):
@@ -164,7 +181,7 @@ class KPMAssetApiRecoveryTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {'GH_TOKEN': 'read-token-must-not-leak'}), redirect_stdout(io.StringIO()) as output:
             self.assertEqual(self.payload, kpm.download(URL, len(self.payload)))
         requests = [call.args[0] for call in self.opener.open.call_args_list]
-        self.assertEqual([URL, METADATA_URL, ASSET_URL, CDN], [request.full_url for request in requests])
+        self.assertEqual([CANONICAL_URL, METADATA_URL, ASSET_URL, CDN], [request.full_url for request in requests])
         for index, request in enumerate(requests):
             self.assertIsNone(request.get_header('Cookie'))
             self.assertEqual('Bearer read-token-must-not-leak' if index in (1, 2) else None,
@@ -188,8 +205,8 @@ class KPMAssetApiRecoveryTests(unittest.TestCase):
             elif mutation == 'bool_id': asset['id'] = True
             elif mutation == 'name': asset['name'] = 'another-tool'
             elif mutation == 'size': asset['size'] += 1
-            elif mutation == 'asset_url': asset['url'] = ASSET_URL.replace(kpm.REPOSITORY, 'another/repository')
-            elif mutation == 'browser_url': asset['browser_download_url'] = URL.replace(kpm.TAG, 'another-tag')
+            elif mutation == 'asset_url': asset['url'] = ASSET_URL.replace(kpm.DOWNLOAD_REPOSITORY, 'another/repository')
+            elif mutation == 'browser_url': asset['browser_download_url'] = CANONICAL_URL.replace(kpm.TAG, 'another-tag')
             elif mutation == 'digest': asset['digest'] = 'sha256:' + '0' * 64
             elif mutation == 'duplicate': metadata['assets'].append(copy.deepcopy(asset))
             elif mutation == 'state': asset['state'] = 'unprocessed'
@@ -216,7 +233,7 @@ class KPMAssetApiRecoveryTests(unittest.TestCase):
                                         self.metadata_response(), response(self.payload)]
         with redirect_stdout(io.StringIO()):
             self.assertEqual(self.payload, kpm.download(URL, len(self.payload)))
-        self.assertEqual([URL, METADATA_URL, ASSET_URL, METADATA_URL, ASSET_URL],
+        self.assertEqual([CANONICAL_URL, METADATA_URL, ASSET_URL, METADATA_URL, ASSET_URL],
                          [call.args[0].full_url for call in self.opener.open.call_args_list])
         self.assertEqual([2, 5], [call.args[0] for call in self.sleep.call_args_list])
 
@@ -229,11 +246,13 @@ class KPMAssetApiRecoveryTests(unittest.TestCase):
             kpm._verified(raw, 'kpimg', self.lock)
 
     def test_unlocked_url_cannot_gain_official_api_request_authority(self):
-        unknown = URL.replace(kpm.REPOSITORY, 'unknown/repository')
-        self.opener.open.side_effect = [failure(504) for _ in range(4)]
-        with redirect_stdout(io.StringIO()), self.assertRaises(kpm.KPMValidationError):
-            kpm.download(unknown, len(self.payload))
-        self.assertEqual([unknown] * 4, [call.args[0].full_url for call in self.opener.open.call_args_list])
+        for unlocked in (URL.replace(kpm.REPOSITORY, 'unknown/repository'), CANONICAL_URL):
+            with self.subTest(url=unlocked):
+                self.opener.reset_mock()
+                self.opener.open.side_effect = [failure(504) for _ in range(4)]
+                with redirect_stdout(io.StringIO()), self.assertRaises(kpm.KPMValidationError):
+                    kpm.download(unlocked, len(self.payload))
+                self.assertEqual([unlocked] * 4, [call.args[0].full_url for call in self.opener.open.call_args_list])
 
     def test_malformed_and_oversized_api_metadata_are_rejected_without_asset_download(self):
         for raw in (b'not-json', b'x' * (1024 * 1024 + 1)):
@@ -253,7 +272,7 @@ class KPMAssetApiRecoveryTests(unittest.TestCase):
         self.opener.open.side_effect = [failure(504), partial, self.metadata_response(), response(self.payload)]
         with redirect_stdout(io.StringIO()) as output:
             self.assertEqual(self.payload, kpm.download(URL, len(self.payload)))
-        self.assertEqual([URL, METADATA_URL, METADATA_URL, ASSET_URL],
+        self.assertEqual([CANONICAL_URL, METADATA_URL, METADATA_URL, ASSET_URL],
                          [call.args[0].full_url for call in self.opener.open.call_args_list])
         self.assertEqual([2, 5], [call.args[0] for call in self.sleep.call_args_list])
         self.assertIn('incomplete response', output.getvalue())

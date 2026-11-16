@@ -89,6 +89,12 @@ import re
 import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding='utf-8')
+# The archived Ultra source still fetches from the retired raw GitHub path.
+# Use the same upstream files from the renamed repository at a fixed commit.
+text = text.replace(
+    'https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/refs/heads/main/kpm',
+    'https://raw.githubusercontent.com/SukiSU-Nova/SukiSU_patch/4ee085a39e3c95e44c9cac7af040e83bf926e6fa/kpm',
+)
 # The upstream signing plugin falls back to the shared debug key when no
 # keystore is present. Remove only its known declaration/configuration so the
 # release remains unsigned until the separate private signing step.

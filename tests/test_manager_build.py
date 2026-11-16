@@ -76,6 +76,19 @@ protobuf { untouched() }
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(self.gradle.read_text(encoding='utf-8'), source)
 
+    def test_legacy_kpm_download_uses_the_fixed_renamed_source(self):
+        old = 'https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/refs/heads/main/kpm'
+        release_url = 'https://example.invalid/other-asset'
+        source = self.source + f'val baseUrl = "{old}"\nval other = "{release_url}"\n'
+        result = self.run_transform(source)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = self.gradle.read_text(encoding='utf-8')
+        self.assertNotIn(old, output)
+        new = ('https://raw.githubusercontent.com/SukiSU-Nova/SukiSU_patch/'
+               '4ee085a39e3c95e44c9cac7af040e83bf926e6fa/kpm')
+        self.assertIn(f'val baseUrl = "{new}"', output)
+        self.assertIn(f'val other = "{release_url}"', output)
+
     def test_signing_transform_never_rewrites_architecture_declarations(self):
         for source in [self.source.replace('"arm64-v8a", ', ''),
                        self.source.replace('"x86_64"', 'extraAbi'),

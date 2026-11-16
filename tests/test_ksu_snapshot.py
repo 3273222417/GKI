@@ -95,6 +95,23 @@ class KsuSourceSnapshotTests(unittest.TestCase):
         self.restore()
         self.assertNotIn(secret, self.git(self.destination, "config", "--list"))
 
+    def test_approved_sukisu_stable_snapshot_preserves_a_removed_release_tag(self):
+        from approved_manager_builds import APPROVED_PATH, LATEST, STABLE, approved_document
+        from manager_variants import MANAGERS
+
+        channels = {variant: {LATEST: (self.reference, 'main')} for variant in MANAGERS}
+        channels['SukiSU'][STABLE] = (self.reference, 'v4.3.0-r2')
+        approval = self.root / APPROVED_PATH
+        approval.parent.mkdir()
+        approval.write_text(json.dumps(approved_document(channels)), encoding='utf-8')
+        self.assertEqual('', self.git(self.source, 'tag', '--list', 'v4.3.0-r2'))
+
+        manifest = self.create(tier=STABLE)
+        self.assertEqual('v4.3.0-r2', manifest['git_describe'])
+        self.assertEqual(2, manifest['git_count'])
+        self.restore()
+        self.assertEqual(self.reference, self.git(self.destination, 'rev-parse', 'refs/tags/v4.3.0-r2'))
+
     def test_bakasu_snapshot_preserves_original_history_without_applying_sukisu_port(self):
         repository = 'Baka-SU/BakaSU'
         self.git(self.source, 'remote', 'set-url', 'origin', f'https://github.com/{repository}.git')

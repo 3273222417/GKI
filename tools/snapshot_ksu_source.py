@@ -228,6 +228,17 @@ def snapshot_source(source: Path, output: Path, reference: str, *, root: Path = 
         raise SnapshotError("SukiSU snapshot parent directory does not exist")
     check_official_source(source, variant)
     identity = source_identity(source, reference)
+    if variant == 'SukiSU' and tier == 'Stable(标准)':
+        from approved_manager_builds import APPROVED_PATH, STABLE, read_approved
+        if (root / APPROVED_PATH).is_file():
+            stable = read_approved(root)['SukiSU'].get(STABLE)
+            if stable and stable[0] == reference:
+                tag = stable[1]
+                if not git(source, 'tag', '--list', tag):
+                    # The source was already verified with this release tag.
+                    # Preserve its version in the isolated checkout and bundle.
+                    git(source, 'update-ref', 'refs/tags/' + tag, reference, '0' * 40)
+                    identity = source_identity(source, reference)
     dependency_refs = []
     if susfs_sources is not None:
         from shared_susfs_source import NAMESPACE, verify_local_sources
