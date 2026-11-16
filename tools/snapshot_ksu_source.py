@@ -39,7 +39,7 @@ class SnapshotError(ValueError):
 
 
 GIT_OPERATIONS = frozenset(('add', 'bundle', 'cat-file', 'checkout', 'clone', 'config',
-                            'describe', 'diff', 'fetch', 'fsck', 'init', 'log', 'remote',
+                            'describe', 'diff', 'fetch', 'fsck', 'init', 'log', 'ls-remote', 'remote',
                             'rev-list', 'rev-parse', 'show', 'status', 'tag', 'update-ref'))
 GIT_FAILURE_CATEGORIES = frozenset(('GitLab server load', 'HTTP error', 'DNS resolution',
     'connection failure', 'TLS failure', 'redirect refused', 'missing remote ref',

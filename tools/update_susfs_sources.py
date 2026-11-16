@@ -9,20 +9,24 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import copy
+from functools import partial
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import sys
+from tempfile import gettempdir
 from urllib.parse import quote
 import uuid
 
-from check_official_updates import TARGETS, gitlab_head
+from check_official_updates import TARGETS, gitlab_heads
 from manager_variants import MANAGERS as ALL_MANAGERS
-from official_susfs_archive import API, MAX_JSON
+from official_susfs_archive import API, MAX_JSON, git_bytes
 from pin_build_dependencies import CompatibilityError, target_version
-from susfs_sync_transport import RunMetadataCache, request_bytes
+from shared_susfs_source import OFFICIAL
+from snapshot_ksu_source import SnapshotError, git, temporary_directory
+from susfs_sync_transport import RunMetadataCache, SusfsMetadataUnavailable, request_bytes as request_metadata_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 RECEIPT_PATH = 'data/susfs-upstream-candidates.json'
@@ -37,6 +41,8 @@ VERSION = re.compile(r'v[0-9]+\.[0-9]+\.[0-9]+\Z')
 # All other root entries (including directories, scripts and hidden build
 # metadata) are part of the identity. These are documentation blobs only.
 DOCUMENTATION = {'README', 'README.md', 'README.rst', 'LICENSE', 'COPYING', 'AUTHORS'}
+VERSION_HEADER = 'kernel_patches/include/linux/susfs.h'
+request_bytes = partial(request_metadata_bytes, recover_via_git=True)
 
 
 class SusfsUpdateError(ValueError):
@@ -128,6 +134,33 @@ def verify_receipt_pins(receipt, profile_document, manager_pins_document):
     return receipt
 
 
+def add_tree_entries(batch, entries, names):
+    for item in batch:
+        if (not isinstance(item, dict) or not isinstance(item.get('name'), str)
+                or item['name'] != item.get('path') or not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', item['name'])
+                or item['name'] in ('.', '..') or item['name'] in names
+                or (item.get('type'), item.get('mode')) not in (('tree', '040000'), ('blob', '100644'), ('blob', '100755'))):
+            raise SusfsUpdateError('Unexpected or duplicate official SUSFS root entry')
+        names.add(item['name'])
+        _sha(item.get('id'))
+        if item['name'] not in DOCUMENTATION or item['type'] != 'blob' or item['mode'] != '100644':
+            entries.append({key: item[key] for key in ('name', 'type', 'mode', 'id')})
+
+
+def verify_patch_tree(entries):
+    if not any(item['name'] == 'kernel_patches' and item['type'] == 'tree' for item in entries):
+        raise SusfsUpdateError('Official SUSFS source lacks the complete kernel patch tree')
+
+
+def metadata_from_tree(reference, entries, header):
+    versions = re.findall(r'^\s*#define\s+SUSFS_VERSION\s+"(v[0-9]+\.[0-9]+\.[0-9]+)"', header.decode('utf-8'), re.M)
+    if len(versions) != 1:
+        raise SusfsUpdateError('Official SUSFS header must declare one version')
+    digest = hashlib.sha256(json.dumps(sorted(entries, key=lambda row: row['name']),
+                           sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return {'ref': reference, 'version': versions[0], 'build_tree_sha256': digest}
+
+
 def observe_metadata(reference, *, fetch=None):
     """Read fixed official metadata; every non-documentation root tree is bound."""
     reference = _sha(reference)
@@ -143,34 +176,88 @@ def observe_metadata(reference, *, fetch=None):
         batch = _json(fetch(url, MAX_JSON))
         if not isinstance(batch, list) or len(batch) > 100:
             raise SusfsUpdateError('Invalid official SUSFS tree inventory')
-        for item in batch:
-            if (not isinstance(item, dict) or not isinstance(item.get('name'), str)
-                    or item['name'] != item.get('path') or not re.fullmatch(r'[A-Za-z0-9_.-]{1,200}', item['name'])
-                    or item['name'] in ('.', '..') or item['name'] in names
-                    or (item.get('type'), item.get('mode')) not in (('tree', '040000'), ('blob', '100644'), ('blob', '100755'))):
-                raise SusfsUpdateError('Unexpected or duplicate official SUSFS root entry')
-            names.add(item['name'])
-            _sha(item.get('id'))
-            if item['name'] not in DOCUMENTATION or item['type'] != 'blob' or item['mode'] != '100644':
-                entries.append({key: item[key] for key in ('name', 'type', 'mode', 'id')})
+        add_tree_entries(batch, entries, names)
         if len(batch) < 100:
             break
     else:
         raise SusfsUpdateError('Official SUSFS tree inventory exceeded its bound')
-    if not any(item['name'] == 'kernel_patches' and item['type'] == 'tree' for item in entries):
-        raise SusfsUpdateError('Official SUSFS source lacks the complete kernel patch tree')
-    path = quote('kernel_patches/include/linux/susfs.h', safe='')
-    header = fetch(API + '/repository/files/' + path + '/raw?ref=' + reference, MAX_JSON).decode('utf-8')
-    versions = re.findall(r'^\s*#define\s+SUSFS_VERSION\s+"(v[0-9]+\.[0-9]+\.[0-9]+)"', header, re.M)
-    if len(versions) != 1:
-        raise SusfsUpdateError('Official SUSFS header must declare one version')
-    digest = hashlib.sha256(json.dumps(sorted(entries, key=lambda row: row['name']),
-                           sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    observation = {'ref': reference, 'version': versions[0], 'build_tree_sha256': digest}
+    verify_patch_tree(entries)
+    path = quote(VERSION_HEADER, safe='')
+    header = fetch(API + '/repository/files/' + path + '/raw?ref=' + reference, MAX_JSON)
+    observation = metadata_from_tree(reference, entries, header)
     if cache is not None:
         # Store only after all inventory, version and digest checks succeeded.
         cache.write(reference, observation)
     return observation
+
+
+def observe_git_metadata(references):
+    """Fetch exact official objects without moving refs, checking out or executing files."""
+    references = sorted({_sha(reference) for reference in references})
+    if not 1 <= len(references) <= len(TARGETS) * (len(ALL_MANAGERS) + 1):
+        raise SusfsUpdateError('Unexpected number of SUSFS metadata commits')
+    namespace = 'refs/gki-susfs-metadata/'
+    temporary = Path(os.environ.get('RUNNER_TEMP') or gettempdir())
+    with temporary_directory(temporary, '.susfs-sync-git-') as repository:
+        git(repository, 'init', '--quiet', '--bare')
+        git(repository, '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always',
+            '-c', 'http.extraHeader=', '-c', 'http.https://gitlab.com/.extraHeader=',
+            '-c', 'credential.helper=', '-c', 'http.followRedirects=false',
+            '-c', 'http.cookieFile=', '-c', 'http.saveCookies=false', '-c', 'fetch.fsckObjects=true',
+            'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--depth=1', OFFICIAL,
+            *(reference + ':' + namespace + reference for reference in references), timeout=90)
+        metadata = {}
+        for reference in references:
+            if git(repository, 'rev-parse', '--verify', namespace + reference + '^{commit}') != reference:
+                raise SusfsUpdateError('Official SUSFS Git returned a different fixed commit')
+            inventory = git_bytes(repository, 'ls-tree', '-z', reference).decode('utf-8')
+            rows = inventory.split('\0')
+            if rows[-1] != '' or len(rows) > 1000:
+                raise SusfsUpdateError('Invalid or oversized official SUSFS Git tree')
+            batch = []
+            for row in rows[:-1]:
+                match = re.fullmatch(r'([0-9]{6}) (\w+) ([0-9a-f]{40})\t(.+)', row)
+                if match is None:
+                    raise SusfsUpdateError('Invalid official SUSFS Git tree entry')
+                mode, entry_type, entry_id, name = match.groups()
+                batch.append({'name': name, 'path': name, 'mode': mode, 'type': entry_type, 'id': entry_id})
+            entries = []
+            add_tree_entries(batch, entries, set())
+            verify_patch_tree(entries)
+            path = reference + ':' + VERSION_HEADER
+            size = git(repository, 'cat-file', '-s', path)
+            if (not size.isdigit() or not 1 <= int(size) <= MAX_JSON
+                    or git(repository, 'cat-file', '-t', path) != 'blob'):
+                raise SusfsUpdateError('Invalid official SUSFS Git version header')
+            metadata[reference] = metadata_from_tree(reference, entries, git_bytes(repository, 'cat-file', 'blob', path))
+        return metadata
+
+
+def collect_metadata(references, *, fetch=None):
+    # Withdraw pending API calls before switching once to the official Git data.
+    pool = ThreadPoolExecutor(max_workers=2)
+    futures = {pool.submit(observe_metadata, value, fetch=fetch): value for value in references}
+    try:
+        return {futures[future]: future.result() for future in as_completed(futures)}
+    except SusfsMetadataUnavailable as problem:
+        if fetch is not None:
+            raise
+        failure = str(problem)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+    for future in futures:
+        if not future.cancelled() and (problem := future.exception()) is not None and not isinstance(problem, SusfsMetadataUnavailable):
+            raise problem
+    print('Official SUSFS metadata REST transport unavailable; checking exact commits through official Git.', flush=True)
+    try:
+        metadata = observe_git_metadata(references)
+    except SnapshotError as problem:
+        raise SusfsUpdateError(f'{failure}; official SUSFS Git verification failed: {problem}') from None
+    cache = RunMetadataCache.from_environment()
+    if cache is not None:
+        for reference, observation in metadata.items():
+            cache.write(reference, observation)
+    return metadata
 
 
 def plan(sources, profile_document, manager_pins_document, *, fetch=None):
@@ -179,16 +266,7 @@ def plan(sources, profile_document, manager_pins_document, *, fetch=None):
     sources = {target: _sha(sources[target]) for target in TARGETS}
     pins, versions = configured_pins(profile_document, manager_pins_document)
     references = sorted(set(sources.values()) | {value for rows in pins.values() for value in rows.values()})
-    # Stop scheduling the remaining commits after a terminal rate-limit or
-    # metadata failure, instead of draining the whole queued inventory first.
-    pool = ThreadPoolExecutor(max_workers=2)
-    futures = {pool.submit(observe_metadata, value, fetch=fetch): value for value in references}
-    metadata = {}
-    try:
-        for future in as_completed(futures):
-            metadata[futures[future]] = future.result()
-    finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+    metadata = collect_metadata(references, fetch=fetch)
     receipt = {'schema_version': 1, 'source': SOURCE, 'policy': POLICY,
                'candidates': {target: metadata[sources[target]] for target in TARGETS}, 'pins': {}}
     after_profile, after_managers = copy.deepcopy(profile_document), copy.deepcopy(manager_pins_document)
@@ -282,7 +360,7 @@ def main(argv=None):
         profile, managers = _read(root, PROFILE_PATH), _read(root, PINS_PATH)
         old = _read(root, RECEIPT_PATH, missing=True)
         if args.check:
-            source = _json(args.candidates_json) if args.candidates_json is not None else {target: gitlab_head(target) for target in TARGETS}
+            source = _json(args.candidates_json) if args.candidates_json is not None else gitlab_heads()
             source = source.get('susfs', source)
             receipt, after_profile, after_managers = plan(source, profile, managers)
             if old is not None:

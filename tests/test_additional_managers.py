@@ -305,7 +305,7 @@ class AdditionalUpstreamTests(unittest.TestCase):
         baka = {'branch': 'master', 'head': 'b' * 40, 'release': None, 'prerelease': None}
         with patch.object(updates, 'github_json', api), patch.object(updates, 'github_commit', return_value='b' * 40), \
                 patch.object(updates, 'fetch_bakasu_snapshot', return_value=baka), \
-                patch.object(updates, 'gitlab_head', return_value='d' * 40):
+                patch.object(updates, 'gitlab_heads', return_value=dict.fromkeys(updates.TARGETS, 'd' * 40)):
             snapshot = updates.fetch_snapshot(current)
         for variant in MANAGERS:
             self.assertEqual('b' * 40, snapshot[variant.lower()]['head'])

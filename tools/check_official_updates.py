@@ -20,6 +20,9 @@ import uuid
 from pin_build_dependencies import CompatibilityError, load_profile
 from resolve_build_sources import (NoRedirect as GitHubNoRedirect, SourceResolutionError,
                                    github_commit, github_json, validate_ref)
+from shared_susfs_source import OFFICIAL as SUSFS_GIT_URL
+from snapshot_ksu_source import GitCommandError, SnapshotError, git
+from susfs_sync_transport import retry_delay
 
 ROOT = Path(__file__).resolve().parents[1]
 SUKISU = 'SukiSU-Ultra/SukiSU-Ultra'
@@ -76,6 +79,7 @@ def gitlab_head(target: str) -> str:
     request = Request(url, headers={'Accept': 'application/json', 'User-Agent': 'gki-official-updates'})
     label = 'SUSFS ' + branch
     for attempt in range(LOOKUP_ATTEMPTS):
+        delay = attempt + 1
         try:
             with build_opener(NoRedirect()).open(request, timeout=60) as response:
                 if response.geturl() != url or urlsplit(response.geturl()).netloc != 'gitlab.com':
@@ -88,21 +92,54 @@ def gitlab_head(target: str) -> str:
                 document = json.loads(raw)
             break
         except HTTPError as error:
-            if error.code not in (408, 429, 500, 502, 503, 504):
-                raise UpdateError(f'{label}: official API failed (HTTP {error.code})') from None
+            code = error.code
+            retry_after = error.headers.get('Retry-After') if error.headers else None
+            error.close()
+            if code not in (408, 429, 500, 502, 503, 504):
+                raise UpdateError(f'{label}: official API failed (HTTP {code})') from None
             if attempt + 1 == LOOKUP_ATTEMPTS:
-                raise UpdateError(f'{label}: official API failed (HTTP {error.code}) after {LOOKUP_ATTEMPTS} attempts') from None
+                raise UpdateError(f'{label}: official API failed (HTTP {code}) after {LOOKUP_ATTEMPTS} attempts') from None
+            if retry_after is not None and code in (429, 503):
+                try:
+                    delay = retry_delay(retry_after, delay)
+                except SnapshotError as problem:
+                    raise UpdateError(f'{label}: {problem}') from None
         except (URLError, OSError):
             if attempt + 1 == LOOKUP_ATTEMPTS:
                 raise UpdateError(f'{label}: network lookup failed after {LOOKUP_ATTEMPTS} attempts') from None
         except (ValueError, UnicodeError):
             raise UpdateError(label + ': official API returned invalid JSON') from None
-        time.sleep(attempt + 1)
+        time.sleep(delay)
     commit = document.get('commit') if isinstance(document, dict) else None
     if (not isinstance(commit, dict) or not isinstance(commit.get('id'), str)
             or not SHA.fullmatch(commit['id']) or document.get('name', branch) != branch):
         raise UpdateError(label + ': official branch did not return its full commit SHA')
     return commit['id'].lower()
+
+
+def gitlab_heads() -> dict[str, str]:
+    """Read the five exact branch heads in a single official Git request."""
+    refs = {'refs/heads/gki-' + target: target for target in TARGETS}
+    try:
+        output = git(ROOT, '-c', 'http.extraHeader=', '-c', 'http.https://gitlab.com/.extraHeader=',
+                     '-c', 'credential.helper=', '-c', 'http.followRedirects=false',
+                     '-c', 'http.cookieFile=', '-c', 'http.saveCookies=false',
+                     '-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always',
+                     'ls-remote', '--exit-code', '--refs', SUSFS_GIT_URL, *refs, timeout=45)
+    except GitCommandError as error:
+        print(f'::warning::Official SUSFS Git branch lookup unavailable ({error.diagnostic}); checking the official API.',
+              flush=True)
+        return {target: gitlab_head(target) for target in TARGETS}
+    heads = {}
+    for line in output.splitlines():
+        commit, separator, ref = line.partition('\t')
+        target = refs.get(ref)
+        if not separator or target is None or target in heads or not SHA.fullmatch(commit):
+            raise UpdateError('Official SUSFS Git returned an invalid or duplicate branch identity')
+        heads[target] = commit.lower()
+    if set(heads) != set(TARGETS):
+        raise UpdateError('Official SUSFS Git did not return all five requested branch heads')
+    return heads
 
 
 def baseline(root: Path) -> dict:
@@ -270,7 +307,7 @@ def fetch_snapshot(current: dict) -> dict:
                               'sukisu': {'branch': branch, 'head': head, 'release': release, 'development': development},
                               'bakasu': fetch_bakasu_snapshot(),
                               **{key: fetch_additional_snapshot(variant) for key, variant in ADDITIONAL_TRACKS.items()},
-                              'susfs': {target: gitlab_head(target) for target in TARGETS}})
+                              'susfs': gitlab_heads()})
 
 
 def validate_snapshot(value: object) -> dict:

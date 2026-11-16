@@ -56,6 +56,10 @@ class RequestGate:
 GATE = RequestGate()
 
 
+class SusfsMetadataUnavailable(SnapshotError):
+    """A temporary REST failure can be checked via official Git instead."""
+
+
 def retry_delay(value, fallback, *, now=None):
     if value is None:
         return fallback
@@ -73,11 +77,11 @@ def retry_delay(value, fallback, *, now=None):
             raise SnapshotError('Official SUSFS metadata Retry-After is invalid') from None
     if seconds > MAX_RETRY_DELAY:
         # Never retry before the server's window, nor hang this job indefinitely.
-        raise SnapshotError('Official SUSFS rate limit requires a later retry; no unverified update was applied')
+        raise SusfsMetadataUnavailable('Official SUSFS rate limit requires a later retry; no unverified update was applied')
     return max(fallback, seconds)
 
 
-def request_bytes(url, limit, *, opener=None, gate=None):
+def request_bytes(url, limit, *, opener=None, gate=None, recover_via_git=False):
     if not isinstance(url, str) or not (TREE_URL.fullmatch(url) or HEADER_URL.fullmatch(url)):
         raise SnapshotError('Unexpected official SUSFS metadata destination')
     if type(limit) is not int or not 1 <= limit <= 2 * 1024 * 1024:
@@ -101,16 +105,20 @@ def request_bytes(url, limit, *, opener=None, gate=None):
         except HTTPError as error:
             code, retry_after = error.code, error.headers.get('Retry-After') if error.headers else None
             error.close()
-            if code not in (408, 429, 500, 502, 503, 504) or attempt + 1 == MAX_ATTEMPTS:
+            if code not in (408, 429, 500, 502, 503, 504):
                 raise SnapshotError(f'Official SUSFS metadata HTTP request failed (HTTP {code}); no unverified update was applied') from None
+            if attempt + 1 == MAX_ATTEMPTS:
+                raise SusfsMetadataUnavailable(f'Official SUSFS metadata HTTP request failed (HTTP {code}); no unverified update was applied') from None
             fallback = (10, 20, 40)[attempt] if code == 429 else (2, 5, 10)[attempt]
             delay = retry_delay(retry_after, fallback) if code in (429, 503) else fallback
             if code == 429:
                 print(f'Official SUSFS metadata rate limited; respecting shared {delay:g}s cooldown', flush=True)
             gate.cooldown(delay)
+            if code == 429 and recover_via_git:
+                raise SusfsMetadataUnavailable('Official SUSFS metadata REST request was rate limited (HTTP 429)') from None
         except (OSError, URLError, TimeoutError):
             if attempt + 1 == MAX_ATTEMPTS:
-                raise SnapshotError('Official SUSFS metadata transport failed after four attempts') from None
+                raise SusfsMetadataUnavailable('Official SUSFS metadata transport failed after four attempts') from None
             gate.cooldown((2, 5, 10)[attempt])
     raise AssertionError('Unreachable official SUSFS retry state')
 

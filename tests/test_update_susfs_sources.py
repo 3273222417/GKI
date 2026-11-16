@@ -188,7 +188,7 @@ class SusfsSyncTests(unittest.TestCase):
             output = root / 'outputs'
             def invoke(*args):
                 output.write_text('', encoding='utf-8')
-                with mock.patch.object(update, 'request_bytes', side_effect=transport), mock.patch.object(update, 'gitlab_head', side_effect=AssertionError('branch re-lookup')), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                with mock.patch.object(update, 'request_bytes', side_effect=transport), mock.patch.object(update, 'gitlab_heads', side_effect=AssertionError('branch re-lookup')), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                     result = update.main([*args, '--root', str(root), '--github-output', str(output)])
                 values = dict(line.split('=', 1) for line in output.read_text('utf-8').splitlines())
                 return result, values
@@ -210,9 +210,9 @@ class SusfsSyncTests(unittest.TestCase):
             (root / 'config').mkdir()
             (root / update.PROFILE_PATH).write_text(json.dumps(self.profile), encoding='utf-8')
             (root / update.PINS_PATH).write_text(json.dumps(self.managers), encoding='utf-8')
-            with mock.patch.object(update, 'gitlab_head', return_value=NEW) as heads, mock.patch.object(update, 'request_bytes', side_effect=transport), redirect_stdout(io.StringIO()):
+            with mock.patch.object(update, 'gitlab_heads', return_value=self.sources) as heads, mock.patch.object(update, 'request_bytes', side_effect=transport), redirect_stdout(io.StringIO()):
                 self.assertEqual(0, update.main(['--check', '--root', str(root)]))
-            self.assertEqual(list(update.TARGETS), [call.args[0] for call in heads.call_args_list])
+            heads.assert_called_once_with()
 
 
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
-from snapshot_ksu_source import temporary_directory, SnapshotError
+from snapshot_ksu_source import git, temporary_directory, SnapshotError
 import susfs_sync_transport as transport
 import update_susfs_sources as update
 import test_update_susfs_sources as fixtures
@@ -76,6 +76,15 @@ class SusfsTransportTests(unittest.TestCase):
         request = opener.open.call_args.args[0]
         self.assertNotIn('Authorization', request.headers)
 
+    def test_rate_limited_rest_hands_off_without_repeating_request(self):
+        gate = Gate()
+        opener = mock.Mock()
+        opener.open.side_effect = limited()
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(transport.SusfsMetadataUnavailable, 'HTTP 429'):
+            transport.request_bytes(URL, 1024, opener=opener, gate=gate, recover_via_git=True)
+        self.assertEqual([25], gate.delays)
+        self.assertEqual(1, opener.open.call_count)
+
     def test_persistent_429_is_bounded_and_never_becomes_success(self):
         gate = Gate()
         opener = mock.Mock()
@@ -132,7 +141,7 @@ class SusfsTransportTests(unittest.TestCase):
             sources = {target: fixtures.NEW for target in update.TARGETS}
             with mock.patch.dict(os.environ, self.environment(directory), clear=False), \
                     mock.patch.object(update, 'request_bytes', side_effect=fixtures.transport) as fetched, \
-                    mock.patch.object(update, 'gitlab_head', side_effect=AssertionError('branch drift')), redirect_stdout(io.StringIO()):
+                    mock.patch.object(update, 'gitlab_heads', side_effect=AssertionError('branch drift')), redirect_stdout(io.StringIO()):
                 self.assertEqual(0, update.main(['--check', '--root', str(directory), '--candidates-json', json.dumps(sources), '--github-output', str(output)]))
                 values = dict(line.split('=', 1) for line in output.read_text('utf-8').splitlines())
                 receipt = json.loads(values['candidates_json'])
@@ -180,6 +189,67 @@ class SusfsTransportTests(unittest.TestCase):
                     update.observe_metadata(fixtures.NEW)
                 cache = transport.RunMetadataCache.from_environment()
                 self.assertFalse(cache.path(fixtures.NEW).exists())
+
+    def test_429_uses_one_verified_git_fetch_with_same_digest_and_reuses_it_for_apply(self):
+        with temporary_directory(ROOT / 'tests', '.susfs-sync-run-') as directory:
+            upstream = directory / 'upstream'
+            upstream.mkdir()
+            git(upstream, 'init', '--quiet')
+            git(upstream, 'config', 'user.name', 'SUSFS metadata test')
+            git(upstream, 'config', 'user.email', 'susfs-test@example.invalid')
+            header = upstream / update.VERSION_HEADER
+            header.parent.mkdir(parents=True)
+            header.write_bytes(b'#define SUSFS_VERSION "v2.3.0"\n')
+            (upstream / 'setup.sh').write_bytes(b'# engine\n')
+            git(upstream, 'add', '--', '.')
+            git(upstream, 'commit', '--quiet', '-m', 'source')
+            old = git(upstream, 'rev-parse', 'HEAD')
+            (upstream / 'README.md').write_bytes(b'# docs\n')
+            git(upstream, 'add', '--', 'README.md')
+            git(upstream, 'commit', '--quiet', '-m', 'docs')
+            new = git(upstream, 'rev-parse', 'HEAD')
+
+            def exact_api(url, _limit):
+                reference = url.split('ref=')[1].split('&')[0]
+                if '/repository/tree?' not in url:
+                    return header.read_bytes()
+                tree = git(upstream, 'rev-parse', f'{reference}:kernel_patches')
+                setup = git(upstream, 'rev-parse', f'{reference}:setup.sh')
+                return json.dumps([{'name': 'kernel_patches', 'path': 'kernel_patches', 'mode': '040000', 'type': 'tree', 'id': tree},
+                                   {'name': 'setup.sh', 'path': 'setup.sh', 'mode': '100644', 'type': 'blob', 'id': setup}]).encode()
+
+            def use_fixture(repository, *arguments, **options):
+                if 'fetch' in arguments:
+                    self.assertIn(update.OFFICIAL, arguments)
+                    self.assertIn('--depth=1', arguments)
+                    self.assertIn('fetch.fsckObjects=true', arguments)
+                    refs = {arg.split(':')[0] for arg in arguments[arguments.index(update.OFFICIAL) + 1:]}
+                    self.assertEqual({old, new}, refs)
+                    arguments = ('-c', 'protocol.file.allow=always', *(upstream.as_uri() if arg == update.OFFICIAL else arg for arg in arguments))
+                return git(repository, *arguments, **options)
+
+            profile, managers = fixtures.profiles()
+            profile['sukisu_susfs']['pins'] = dict.fromkeys(update.TARGETS, old)
+            for row in managers['managers'].values():
+                row['pins'] = dict.fromkeys(update.TARGETS, old)
+            sources = dict.fromkeys(update.TARGETS, new)
+            expected = update.plan(sources, profile, managers, fetch=exact_api)
+            with mock.patch.dict(os.environ, self.environment(directory)), \
+                    mock.patch.object(update, 'request_bytes', side_effect=transport.SusfsMetadataUnavailable('HTTP 429')), \
+                    mock.patch.object(update, 'git', side_effect=use_fixture) as git_calls, redirect_stdout(io.StringIO()):
+                self.assertEqual(expected, update.plan(sources, profile, managers))
+                self.assertEqual(1, sum('fetch' in call.args for call in git_calls.call_args_list))
+                git_calls.reset_mock()
+                result = update.validate_update(None, expected[0], profile, managers, expected_sources=sources)
+                self.assertEqual(expected[0], result['receipt'])
+                git_calls.assert_not_called()
+
+    def test_invalid_rest_inventory_does_not_trigger_git_recovery(self):
+        with mock.patch.object(update, 'request_bytes', return_value=b'[]'), \
+                mock.patch.object(update, 'observe_git_metadata') as fallback:
+            with self.assertRaisesRegex(update.SusfsUpdateError, 'complete kernel patch tree'):
+                update.collect_metadata([fixtures.NEW])
+        fallback.assert_not_called()
 
     def test_cache_path_cannot_leave_the_run_temporary_directory(self):
         with temporary_directory(ROOT / 'tests', '.susfs-sync-run-') as directory:

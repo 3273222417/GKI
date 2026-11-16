@@ -268,7 +268,7 @@ class OfficialCandidateTests(unittest.TestCase):
                                                              {'status': 'behind', 'base_commit': {'sha': BASE}},
                                                              {'name': 'dev', 'commit': {'sha': 'e' * 40}}]) as github:
             with patch.object(updates, 'github_commit', side_effect=[NEW, OLD_RELEASE]) as commit:
-                with patch.object(updates, 'gitlab_head', side_effect=lambda target: PINS[target]) as gitlab:
+                with patch.object(updates, 'gitlab_heads', return_value=PINS) as gitlab:
                     snapshot = updates.fetch_snapshot(current)
         self.assertEqual(snapshot['sukisu']['head'], NEW)
         self.assertFalse(snapshot['sukisu']['release']['newer_than_baseline'])
@@ -280,12 +280,12 @@ class OfficialCandidateTests(unittest.TestCase):
         self.assertEqual(snapshot['sukisu']['development'], {'branch': 'dev', 'head': 'e' * 40})
         self.assertEqual(github.call_args_list[3].args, (updates.SUKISU, '/branches/dev'))
         self.assertEqual(github.call_args_list[3].kwargs, {'missing': True})
-        self.assertEqual([call.args[0] for call in gitlab.call_args_list], list(updates.TARGETS))
+        gitlab.assert_called_once_with()
 
     def test_no_official_release_is_supported_without_inventing_a_release(self):
         with patch.object(updates, 'github_json', side_effect=[{'default_branch': 'main'}, None, None]):
             with patch.object(updates, 'github_commit', return_value=BASE):
-                with patch.object(updates, 'gitlab_head', side_effect=lambda target: PINS[target]):
+                with patch.object(updates, 'gitlab_heads', return_value=PINS):
                     self.assertIsNone(updates.fetch_snapshot(updates.baseline(self.root))['sukisu']['release'])
 
     def test_missing_development_branch_is_explicit_and_existing_default_dev_is_reused(self):
@@ -293,7 +293,7 @@ class OfficialCandidateTests(unittest.TestCase):
             reader = MagicMock(side_effect=[{'default_branch': branch}, None, None])
             with self.subTest(branch=branch), patch.object(updates, 'github_json', reader), \
                     patch.object(updates, 'github_commit', return_value=BASE) as commit, \
-                    patch.object(updates, 'gitlab_head', side_effect=lambda target: PINS[target]):
+                    patch.object(updates, 'gitlab_heads', return_value=PINS):
                 found = updates.fetch_snapshot(updates.baseline(self.root))
             expected = {'branch': 'dev', 'head': BASE} if branch == 'dev' else None
             self.assertEqual(expected, found['sukisu']['development'])
@@ -335,7 +335,7 @@ class OfficialCandidateTests(unittest.TestCase):
             raise updates.SourceResolutionError('GitHub source lookup response is too large')
         with patch.object(updates, 'github_json', side_effect=github):
             with patch.object(updates, 'github_commit', return_value=NEW):
-                with patch.object(updates, 'gitlab_head', side_effect=lambda target: PINS[target]):
+                with patch.object(updates, 'gitlab_heads', return_value=PINS):
                     found = updates.fetch_snapshot(updates.baseline(self.root))
         self.assertTrue(found['sukisu']['release']['newer_than_baseline'])
         for comparison in ({'status': 'ahead'}, {'status': 'ahead', 'base_commit': {'sha': NEW}},
@@ -511,6 +511,33 @@ class BakaOfficialProbeTests(unittest.TestCase):
 
 
 class OfficialGitLabSecurityTests(unittest.TestCase):
+    def test_all_heads_use_one_official_git_request_even_if_api_is_limited(self):
+        refs = {f'refs/heads/gki-{target}': commit for target, commit in PINS.items()}
+        response = '\n'.join(f'{commit}\t{ref}' for ref, commit in reversed(list(refs.items())))
+        with patch.object(updates, 'git', return_value=response) as git, \
+                patch.object(updates, 'gitlab_head', side_effect=AssertionError('unexpected API call')):
+            self.assertEqual(PINS, updates.gitlab_heads())
+        git.assert_called_once()
+        args = git.call_args.args
+        self.assertEqual(('ls-remote', '--exit-code', '--refs', updates.SUSFS_GIT_URL, *refs),
+                         args[args.index('ls-remote'):])
+        self.assertIn('credential.helper=', args)
+        self.assertIn('http.followRedirects=false', args)
+
+    def test_git_transport_failure_can_use_the_official_api(self):
+        with patch.object(updates, 'git', side_effect=updates.GitCommandError('ls-remote', http_status=429)), \
+                patch.object(updates, 'gitlab_head', side_effect=PINS.__getitem__) as api, redirect_stdout(io.StringIO()):
+            self.assertEqual(PINS, updates.gitlab_heads())
+        self.assertEqual(list(updates.TARGETS), [call.args[0] for call in api.call_args_list])
+
+    def test_ambiguous_or_incomplete_git_branch_output_is_rejected(self):
+        rows = [f'{commit}\trefs/heads/gki-{target}' for target, commit in PINS.items()]
+        for broken in (rows[:-1], [*rows, rows[0]], [*rows, f'{NEW}\trefs/heads/main']):
+            with self.subTest(broken=broken), patch.object(updates, 'git', return_value='\n'.join(broken)), \
+                    patch.object(updates, 'gitlab_head', side_effect=AssertionError('unexpected API fallback')):
+                with self.assertRaises(updates.UpdateError):
+                    updates.gitlab_heads()
+
     def response(self, document=None):
         url = 'https://gitlab.com/api/v4/projects/simonpunk%2Fsusfs4ksu/repository/branches/gki-android14-6.1'
         response = MagicMock()
@@ -590,6 +617,13 @@ class OfficialGitLabSecurityTests(unittest.TestCase):
         self.assertNotIn('secret-body', str(raised.exception))
         self.assertEqual(opener.open.call_count, 1)
         sleep.assert_not_called()
+
+    def test_branch_rest_fallback_respects_upstream_retry_after(self):
+        response, opener = self.response()
+        opener.open.side_effect = [HTTPError('https://private-url', 429, '', {'Retry-After': '7'}, None), response]
+        with patch.object(updates, 'build_opener', return_value=opener), patch.object(updates.time, 'sleep') as sleep:
+            self.assertEqual(NEW, updates.gitlab_head('android14-6.1'))
+        sleep.assert_called_once_with(7)
 
 
 if __name__ == '__main__':
