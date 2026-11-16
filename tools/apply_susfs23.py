@@ -153,6 +153,9 @@ def verify_native_nova_selinux(repository: Path, core: str) -> bool:
                                   'kernel/hook/lsm_hook.c', 'kernel/hook/lsm_hook.h').returncode:
         raise ValueError('Nova must retain its native SELinux hook provider')
     current = (repository / relative).read_text(encoding='utf-8')
+    includes = set(re.findall(r'(?m)^\s*#\s*include\s+"([^"\n]+)"', current))
+    if not {'hook/lsm_hook.h', 'infra/symbol_resolver.h'} <= includes:
+        raise ValueError('Nova SELinux inode label hooks need their native declarations')
     native_label_hook = re.compile(r'(?ms)^static int \(\*inode_doinit_with_dentry_fn\).*?'
                                    r'(?=^(?:static )?DEFINE_STATIC_KEY_FALSE\(fake_status_initialize_key\);)')
     before, after = native_label_hook.findall(original.stdout), native_label_hook.findall(current)
