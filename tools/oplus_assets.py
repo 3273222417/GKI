@@ -21,7 +21,7 @@ import apply_kpm_patch as kpm
 from capture_build_metadata import collect as capture, parse_config, state
 from embedded_build_metadata import (metadata_json, read_manager_apk, read_member, validate_members,
                                      official_receipt_from_environment)
-from manager_variants import MANAGERS, manager_profile, valid_manager_apk_filename
+from manager_variants import MANAGERS, allowed_manager_package, manager_display_name, valid_manager_apk_filename
 from prepare_release import release_title
 import oplus_catalog as catalog
 from oplus_vendor_sources import validate_vendor_provenance, verify_vendor_report
@@ -445,10 +445,11 @@ def validate_document(document: dict) -> None:
             or not re.fullmatch(r'[1-9][0-9]*', str(document.get('ksu_version_code', '')))
             or not isinstance(document.get('ksu_version_name'), str) or not document['ksu_version_name']):
         raise AssetError('OPlus kernel lacks its native paired manager version/source identity')
-    if (document.get('manager_package') != manager_profile(variant)['package']
+    package = document.get('manager_package')
+    if (not allowed_manager_package(variant, package)
             or not re.fullmatch(r'[1-9][0-9]*', str(document.get('manager_cert_size', '')))
             or not 64 <= int(document['manager_cert_size']) <= 4096
-            or not valid_manager_apk_filename(document.get('manager_apk_filename'), variant)):
+            or not valid_manager_apk_filename(document.get('manager_apk_filename'), variant, package=package)):
         raise AssetError('OPlus kernel manager package/certificate/filename identity is invalid')
     for field in ('image_sha256', 'config_sha256', 'manager_cert_sha256', 'manager_apk_sha256'):
         if not catalog.SHA256.fullmatch(str(document.get(field, ''))):
@@ -591,7 +592,7 @@ def collect(source: Path, output: Path, matrix: dict, variants: str) -> dict:
     for path in apk_paths:
         manager = read_manager_apk(path, external_metadata=official_receipt_from_environment())
         variant = manager['ksu_variant']
-        if variant not in expected_variants or variant in managers or manager['package'] != manager_profile(variant)['package']:
+        if variant not in expected_variants or variant in managers or not allowed_manager_package(variant, manager['package']):
             raise AssetError('Unexpected, duplicate or wrongly packaged OPlus manager APK')
         if any(str(manager[field]).casefold() != str(current[field]).casefold() for field in
                ('producer_repository', 'producer_run_id', 'producer_head_sha')):
@@ -634,7 +635,8 @@ def collect(source: Path, output: Path, matrix: dict, variants: str) -> dict:
              '| 管理器 | 版本 |', '|---|---|']
     for variant in sorted(managers):
         manager = managers[variant]
-        lines.append('| ' + variant + ' | ' + str(manager['ksu_version_name']) + ' / ' + str(manager['ksu_version_code']) + ' |')
+        label = manager_display_name(variant, manager['package'])
+        lines.append(f"| {label} | {manager['ksu_version_name']} / {manager['ksu_version_code']} |")
     lines += ['', '## 构建配置', '', '| 项目 | 实际配置 |', '|---|---|']
     labels = {'susfs': 'SUSFS', 'hook': 'Hook 类型', 'mount': '挂载方式', 'lto': 'LTO',
               'bbg': 'BBG', 'zram': 'ZRAM', 'lz4kd': 'LZ4KD', 'kpm': 'KPM', 'ntsync': 'NTsync',

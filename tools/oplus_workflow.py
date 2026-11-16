@@ -155,6 +155,7 @@ def kernel_job() -> dict:
          'run': PROFILE_INPUTS},
         {'name': '核实本次已签名 APK 与成功的管理器任务',
          'env': {'GH_TOKEN': '${{ github.token }}',
+                 'KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}',
                  'MANAGER_ARTIFACT': '${{ needs.build-sukisu-manager.outputs.apk_filename }}',
                  'MANAGER_JOB_ID': '${{ needs.build-sukisu-manager.outputs.manager_job_id }}'},
          'run': '''python3 tools/wait_manager_identity.py --expected-ref "$KSU_REF" \\

@@ -12,14 +12,11 @@ import sys
 import tempfile
 
 import sign_sukisu_manager as signing
-from manager_variants import MANAGERS, manager_profile
+from manager_variants import MANAGERS, manager_package, manager_source_package
 
 
-MANAGER_PACKAGE = 'com.sukisu.ultra'
-
-
-def export_certificate(output: Path, variant: str = 'SukiSU') -> dict[str, str | int]:
-    package = manager_profile(variant)['package']
+def export_certificate(output: Path, variant: str = 'SukiSU', *, source: Path | None = None) -> dict[str, str | int]:
+    package = manager_source_package(variant, source) if source is not None else manager_package(variant)
     output = Path(output).resolve()
     if any(ord(character) < 32 for character in str(output)):
         raise signing.SigningError('The public certificate JSON path contains a control character.')
@@ -81,9 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--variant', choices=MANAGERS, default=os.environ.get('KSU_VARIANT', 'SukiSU'))
+    parser.add_argument('--source', type=Path, help='Exact manager source checkout to determine the release application ID')
     args = parser.parse_args(argv)
     try:
-        metadata = export_certificate(args.output, args.variant)
+        metadata = export_certificate(args.output, args.variant, source=args.source)
     except (signing.SigningError, OSError, UnicodeError, ValueError) as error:
         encoded = os.environ.get(signing.KEYSTORE_ENV, '')
         values = (encoded, ''.join(encoded.split()), os.environ.get(signing.PASSWORD_ENV, ''))

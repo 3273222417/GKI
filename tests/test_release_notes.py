@@ -12,6 +12,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import release_notes as notes
+from prepare_release import release_title
 
 UTC = datetime(2026, 10, 22, 6, 7, 8, tzinfo=timezone.utc)
 MANAGER = {
@@ -48,6 +49,17 @@ class ReleaseNotesTests(unittest.TestCase):
 
     def render(self, manager=MANAGER, kernels=None):
         return notes.render_notes(manager, [KERNEL] if kernels is None else kernels, generated_at=UTC)
+
+    def test_nova_uses_verified_brand_in_titles_and_manager_rows(self):
+        nova = {**MANAGER, 'file': 'SukiSU_Nova_v3.0.0_30000-release.apk', 'package': 'com.sukisu.nova',
+                'ksu_branch': 'Stable(标准)', 'ksu_version_code': 30000, 'ksu_version_name': 'v3.0.0'}
+        kernel = {**KERNEL, 'manager_package': nova['package'], 'ksu_version_code': 30000,
+                  'ksu_version_name': nova['ksu_version_name']}
+        self.assertEqual('Android · SukiSU-Nova 30000 正式版', release_title(nova))
+        self.assertEqual('OnePlus · SukiSU-Nova 30000 正式版', release_title(nova, platform='OnePlus'))
+        self.assertEqual('Android · SukiSU 40321 开发版', release_title(MANAGER))
+        self.assertIn('| KernelSU 变体 | SukiSU-Nova |', self.render(nova, [kernel]))
+        self.assertIn('管理器：SukiSU-Nova，', self.render(nova, []))
 
     def test_actual_versions_time_and_all_selected_feature_states(self):
         body = self.render()

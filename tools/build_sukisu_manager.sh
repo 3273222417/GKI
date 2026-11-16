@@ -37,11 +37,20 @@ ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 : "${ANDROID_NDK_HOME:?ANDROID_NDK_HOME must point to the prepared Android NDK}"
 export ANDROID_NDK_HOME
 export CARGO_TARGET_DIR="$source_dir/target"
-if [ "${KSU_PACKAGE_NAME:-com.sukisu.ultra}" != com.sukisu.ultra ]; then
+official_package="$(python3 - "$source_dir" "$build_tools" <<'PY'
+from pathlib import Path
+import sys
+sys.path.insert(0, sys.argv[2])
+from manager_variants import manager_source_package
+print(manager_source_package('SukiSU', Path(sys.argv[1])))
+PY
+)"
+if [ "${KSU_PACKAGE_NAME:-$official_package}" != "$official_package" ]; then
   echo 'The SukiSU manager package must match the official application ID.' >&2
   exit 1
 fi
-export KSU_PACKAGE_NAME=com.sukisu.ultra
+export KSU_PACKAGE_NAME="$official_package"
+unset ORG_GRADLE_PROJECT_KSU_NAME
 [ -d "$ANDROID_HOME" ] && [ -d "$ANDROID_NDK_HOME" ] || { echo 'Android SDK or NDK directory does not exist.' >&2; exit 1; }
 
 # Keep the official version, but repair a trimmed icon JAR without the Kotlin
@@ -89,7 +98,7 @@ import re
 import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding='utf-8')
-# The archived Ultra source still fetches from the retired raw GitHub path.
+# Older SukiSU revisions still fetch from the retired raw GitHub path.
 # Use the same upstream files from the renamed repository at a fixed commit.
 text = text.replace(
     'https://raw.githubusercontent.com/ShirkNeko/SukiSU_patch/refs/heads/main/kpm',
@@ -121,6 +130,9 @@ print('Official APK architecture configuration preserved')
 print('Release signing: separate workflow step')
 PY
 
+if [ "$official_package" = com.sukisu.nova ]; then
+  bash "$build_tools/build_sukisu_builtzygisk.sh" "$source_dir"
+fi
 bash "$build_tools/build_manager_native.sh" "$source_dir"
 
 cd "$manager_dir"
@@ -195,7 +207,7 @@ for name in ('name', 'versionName', 'versionCode'):
     fields[name] = values[0]
 if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+', fields['name']):
     raise SystemExit('The built manager application ID is not a valid ASCII package.')
-if fields['name'] != 'com.sukisu.ultra':
+if fields['name'] != os.environ['KSU_PACKAGE_NAME']:
     raise SystemExit('The built SukiSU manager package must retain the official application ID.')
 version = fields['versionName']
 if not version or len(version) > 128 or any(ord(char) < 32 or ord(char) > 126 for char in version):

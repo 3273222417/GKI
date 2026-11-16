@@ -299,7 +299,7 @@ rustup target add aarch64-linux-android --toolchain "$toolchain"
              'id': 'manager-build',
              'env': {'KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}',
                      'ORG_GRADLE_PROJECT_KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}',
-                     'ORG_GRADLE_PROJECT_KSU_NAME': '${{ inputs.kernelsu_variant }}'},
+                     'ORG_GRADLE_PROJECT_KSU_NAME': "${{ inputs.kernelsu_variant != 'SukiSU' && inputs.kernelsu_variant || '' }}"},
              'run': '''set -euo pipefail
 case "$KSU_VARIANT" in
   SukiSU) script=tools/build_sukisu_manager.sh ;;
@@ -311,7 +311,8 @@ bash -n "$script"
 bash "$script" --source "$GITHUB_WORKSPACE/manager-source" --output "$RUNNER_TEMP/manager-build"
 '''},
             {'name': '实际验证八种 KMI 的镜像修补与恢复',
-             'env': {'KSU_REF': '${{ needs.prepare-matrix.outputs.ksu_ref }}'},
+             'env': {'KSU_REF': '${{ needs.prepare-matrix.outputs.ksu_ref }}',
+                     'KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}'},
              'run': '''python3 tools/verify_manager_boot_patch.py --source "$GITHUB_WORKSPACE/manager-source" \\
   --module-report "$RUNNER_TEMP/manager-lkm-stage.json" --expected-ref "$KSU_REF" \\
   --output "$RUNNER_TEMP/manager-boot-patch-check"
@@ -319,6 +320,7 @@ bash "$script" --source "$GITHUB_WORKSPACE/manager-source" --output "$RUNNER_TEM
             {'name': '签名并校验可安装 APK', 'id': 'sign',
              'env': {'SUKISU_APK_KEYSTORE': '${{ secrets.SUKISU_APK_KEYSTORE }}',
                      'SUKISU_APK_PASSWORD': '${{ secrets.SUKISU_APK_PASSWORD }}',
+                     'KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}',
                      'KSU_SHORT': '${{ needs.prepare-matrix.outputs.ksu_short }}',
                      'KSU_REF': '${{ needs.prepare-matrix.outputs.ksu_ref }}',
                      'KSU_BRANCH': '${{ needs.prepare-matrix.outputs.effective_ksu_branch }}'},
@@ -327,7 +329,8 @@ bash "$script" --source "$GITHUB_WORKSPACE/manager-source" --output "$RUNNER_TEM
   --build-metadata "$RUNNER_TEMP/manager-build/manager-build-metadata.json"
 '''},
             {'name': '记录管理器真实版本',
-             'env': {'META_FILE': '${{ steps.sign.outputs.apk_filename }}',
+             'env': {'KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}',
+                     'META_FILE': '${{ steps.sign.outputs.apk_filename }}',
                      'META_PACKAGE': '${{ steps.sign.outputs.manager_package }}',
                      'META_KSU_VERSION_CODE': '${{ steps.sign.outputs.manager_version_code }}',
                      'META_KSU_VERSION_NAME': '${{ steps.sign.outputs.manager_version_name }}',
@@ -568,6 +571,7 @@ echo 'CONFIG_IKCONFIG=y' >> "$DEFCONFIG"
         'env': {'GH_TOKEN': '${{ github.token }}',
                 'KSU_REF': '${{ needs.prepare-matrix.outputs.ksu_ref }}',
                 'KSU_SHORT': '${{ needs.prepare-matrix.outputs.ksu_short }}',
+                'KSU_PACKAGE_NAME': '${{ needs.prepare-matrix.outputs.manager_package }}',
                 'MANAGER_JOB_ID': '${{ needs.build-sukisu-manager.outputs.manager_job_id }}',
                 'MANAGER_ARTIFACT': '${{ needs.build-sukisu-manager.outputs.apk_filename }}'},
         'run': '''python3 "$GITHUB_WORKSPACE/tools/wait_manager_identity.py" \\
@@ -790,10 +794,6 @@ python3 -m unittest discover -s tests -p 'test_bakasu_kpm_port.py'
              'run': '''python3 tools/resolve_build_sources.py --variant "$KSU_VARIANT" --tier "$KSU_TIER" \\
   --custom-ref "$CUSTOM_REF" --susfs "$ENABLE_SUSFS"
 '''},
-            {'name': '读取固定签名的公开证书', 'id': 'certificate', 'if': PREPARE_IF + ' && ' + ALL_IF,
-             'env': {'SUKISU_APK_KEYSTORE': '${{ secrets.SUKISU_APK_KEYSTORE }}',
-                     'SUKISU_APK_PASSWORD': '${{ secrets.SUKISU_APK_PASSWORD }}'},
-             'run': 'python3 tools/export_manager_certificate.py --output "$RUNNER_TEMP/manager-public-certificate.json"'},
             # Runner evaluates skipped steps' env before their if condition.
             # Keep this tiny JSON available to the local-LKM cache key envs;
             # additional managers still skip every actual LKM build/download.
@@ -809,8 +809,14 @@ PY
 '''},
             {'name': '仅下载一次官方管理器源码', 'uses': 'actions/checkout@v6',
              'if': MANAGER_IF,
-             'with': {'repository': '${{ steps.sources.outputs.ksu_repo }}', 'ref': '${{ steps.sources.outputs.ksu_ref }}',
+             'with': {'repository': "${{ inputs.kernelsu_variant == 'SukiSU' && 'SukiSU-Nova/SukiSU-Nova' || steps.sources.outputs.ksu_repo }}",
+                      'ref': '${{ steps.sources.outputs.ksu_ref }}',
                       'path': 'ksu-snapshot-source', 'fetch-depth': 0, 'persist-credentials': False}},
+            {'name': '核对固定源码的管理器包名并读取公开证书', 'id': 'certificate', 'if': PREPARE_IF + ' && ' + ALL_IF,
+             'env': {'SUKISU_APK_KEYSTORE': '${{ secrets.SUKISU_APK_KEYSTORE }}',
+                     'SUKISU_APK_PASSWORD': '${{ secrets.SUKISU_APK_PASSWORD }}'},
+             'run': 'python3 tools/export_manager_certificate.py --source "$GITHUB_WORKSPACE/ksu-snapshot-source" '
+                    '--output "$RUNNER_TEMP/manager-public-certificate.json"'},
             {'name': '矩阵展开前统一下载并固定 SUSFS', 'id': 'shared-susfs',
              'if': BUILD_IF + ' && inputs.enable_susfs',
              'env': {'SUSFS_MATRIX': '${{ steps.matrix.outputs.matrix }}',

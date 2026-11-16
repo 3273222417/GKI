@@ -44,6 +44,10 @@ class NoStableRelease(SourceResolutionError):
     """No stable release is available from the selected source of truth."""
 
 
+def github_transport_repository(repository: str) -> str:
+    return SUKISU_CURRENT_NAME if repository == REPOSITORIES['SukiSU'] else repository
+
+
 def validate_ref(value: str, *, empty: bool = False) -> str:
     """Accept conventional public branch/tag names and full commit hashes."""
     if empty and value == "":

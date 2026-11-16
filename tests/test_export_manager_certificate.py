@@ -103,6 +103,23 @@ class ManagerCertificateTests(unittest.TestCase):
         export = self.calls[0][0]
         self.assertEqual('gki-sukisu', export[export.index('-alias') + 1])
 
+    def test_exports_nova_certificate_identity_from_the_verified_native_source(self):
+        gradle = self.root / 'manager/app/build.gradle.kts'
+        gradle.parent.mkdir(parents=True)
+        gradle.write_text('val defaultManagerPackageName = if (isPrBuild) "com.sukisu.nova.pr" else "com.sukisu.nova"\n'
+                          'val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName\n'
+                          'namespace = "com.sukisu.nova"\napplicationId = managerPackageName\n', encoding='utf-8')
+        kbuild = self.root / 'kernel/Kbuild'
+        kbuild.parent.mkdir()
+        kbuild.write_text('REPO_NAME   := SukiSU-Nova\n', encoding='utf-8')
+        with patch.object(certificate.signing.subprocess, 'run', side_effect=self.fake_keytool):
+            result = certificate.export_certificate(self.output, source=self.root)
+        self.assertEqual('com.sukisu.nova', result['manager_package'])
+        self.assertEqual(CERT_SHA, result['manager_cert_sha256'])
+        kbuild.write_text('REPO_NAME := SukiSU-Ultra\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'identity disagree'):
+            certificate.export_certificate(self.output, source=self.root)
+
     def test_subprocess_never_receives_private_key_and_password_uses_environment_only(self):
         with patch.object(certificate.signing.subprocess, 'run', side_effect=self.fake_keytool):
             certificate.export_certificate(self.output)

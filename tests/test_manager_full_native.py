@@ -24,10 +24,9 @@ class FullNativeTests(unittest.TestCase):
         self.addCleanup(self.fixture.cleanup)
         self.f = self.fixture
         self.source = self.f.source
-        (self.source / 'manager/app').mkdir(parents=True)
         (self.source / 'manager/build.gradle.kts').write_text('// Official root project\n')
-        (self.source / 'manager/app/build.gradle.kts').write_text(
-            'android { defaultConfig { ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "riscv64") } } }\n')
+        with (self.source / 'manager/app/build.gradle.kts').open('a', encoding='utf-8') as stream:
+            stream.write('android { defaultConfig { ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "riscv64") } } }\n')
         (self.source / 'kernel/susfs').mkdir()
         (self.source / 'kernel/susfs/Makefile').write_text('obj-m += susfs_guard_lkm.o\n')
         self.f.git('add', 'manager', 'kernel/susfs')

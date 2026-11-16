@@ -563,15 +563,6 @@ jobs:
                 or values.get('ksu_source_branch') != os.environ['EXPECTED_SOURCE_BRANCH']):
             raise SystemExit('官方管理器版本在排队期间已变化，请重新检查后构建。')
         PY
-    - name: 读取固定签名的公开证书
-      id: certificate
-      if: true && ('仅编译管理器安装包' == '编译内核' || '仅编译管理器安装包' == '仅编译管理器安装包') && ((matrix.variant == 'SukiSU' || matrix.variant
-        == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant == 'KernelSU' || matrix.variant == 'KowSU' ||
-        matrix.variant == 'FinaSU'))
-      env:
-        SUKISU_APK_KEYSTORE: ${{ secrets.SUKISU_APK_KEYSTORE }}
-        SUKISU_APK_PASSWORD: ${{ secrets.SUKISU_APK_PASSWORD }}
-      run: python3 tools/export_manager_certificate.py --output "$RUNNER_TEMP/manager-public-certificate.json"
     - name: 选择官方镜像修补构建环境
       id: lkm-matrix
       if: true && ('仅编译管理器安装包' == '编译内核' || '仅编译管理器安装包' == '仅编译管理器安装包') && ((matrix.variant == 'SukiSU' || matrix.variant
@@ -592,11 +583,20 @@ jobs:
         == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant == 'KernelSU' || matrix.variant == 'KowSU' ||
         matrix.variant == 'FinaSU'))
       with:
-        repository: ${{ steps.sources.outputs.ksu_repo }}
+        repository: ${{ matrix.variant == 'SukiSU' && 'SukiSU-Nova/SukiSU-Nova' || steps.sources.outputs.ksu_repo }}
         ref: ${{ steps.sources.outputs.ksu_ref }}
         path: ksu-snapshot-source
         fetch-depth: 0
         persist-credentials: false
+    - name: 核对固定源码的管理器包名并读取公开证书
+      id: certificate
+      if: true && ('仅编译管理器安装包' == '编译内核' || '仅编译管理器安装包' == '仅编译管理器安装包') && ((matrix.variant == 'SukiSU' || matrix.variant
+        == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant == 'KernelSU' || matrix.variant == 'KowSU' ||
+        matrix.variant == 'FinaSU'))
+      env:
+        SUKISU_APK_KEYSTORE: ${{ secrets.SUKISU_APK_KEYSTORE }}
+        SUKISU_APK_PASSWORD: ${{ secrets.SUKISU_APK_PASSWORD }}
+      run: python3 tools/export_manager_certificate.py --source "$GITHUB_WORKSPACE/ksu-snapshot-source" --output "$RUNNER_TEMP/manager-public-certificate.json"
     - name: 展开矩阵前验证并固定源码快照
       id: source-snapshot
       if: true && ('仅编译管理器安装包' == '编译内核' || '仅编译管理器安装包' == '仅编译管理器安装包') && ((matrix.variant == 'SukiSU' || matrix.variant
@@ -662,6 +662,7 @@ jobs:
       env:
         KSU_BRANCH: ${{ steps.sources.outputs.effective_ksu_branch }}
         KSU_REF: ${{ steps.sources.outputs.ksu_ref }}
+        KSU_PACKAGE_NAME: ${{ steps.certificate.outputs.package }}
         MANAGER_CERT_SIZE: ${{ steps.certificate.outputs.cert_size }}
         MANAGER_CERT_SHA256: ${{ steps.certificate.outputs.cert_sha256 }}
         MANAGER_SOURCE_IDENTITY: ${{ steps.source-identity.outputs.source_identity }}
@@ -687,6 +688,7 @@ jobs:
       env:
         KSU_BRANCH: ${{ steps.sources.outputs.effective_ksu_branch }}
         KSU_REF: ${{ steps.sources.outputs.ksu_ref }}
+        KSU_PACKAGE_NAME: ${{ steps.certificate.outputs.package }}
         MANAGER_CERT_SIZE: ${{ steps.certificate.outputs.cert_size }}
         MANAGER_CERT_SHA256: ${{ steps.certificate.outputs.cert_sha256 }}
         MANAGER_SOURCE_IDENTITY: ${{ steps.source-identity.outputs.source_identity }}
@@ -2107,7 +2109,7 @@ jobs:
         KSU_PACKAGE_NAME: ${{ needs.prebuild-manager-sources.outputs[format('{0}_manager_package', matrix.slot)] }}
         ORG_GRADLE_PROJECT_KSU_PACKAGE_NAME: ${{ needs.prebuild-manager-sources.outputs[format('{0}_manager_package', matrix.slot)]
           }}
-        ORG_GRADLE_PROJECT_KSU_NAME: ${{ matrix.variant }}
+        ORG_GRADLE_PROJECT_KSU_NAME: ${{ matrix.variant != 'SukiSU' && matrix.variant || '' }}
       run: |
         set -euo pipefail
         case "$KSU_VARIANT" in
@@ -2122,6 +2124,7 @@ jobs:
     - name: 实际验证八种 KMI 的镜像修补与恢复
       env:
         KSU_REF: ${{ needs.prebuild-manager-sources.outputs[format('{0}_ksu_ref', matrix.slot)] }}
+        KSU_PACKAGE_NAME: ${{ needs.prebuild-manager-sources.outputs[format('{0}_manager_package', matrix.slot)] }}
       run: |
         python3 tools/verify_manager_boot_patch.py --source "$GITHUB_WORKSPACE/manager-source" \
           --module-report "$RUNNER_TEMP/manager-lkm-stage.json" --expected-ref "$KSU_REF" \
@@ -2132,6 +2135,7 @@ jobs:
       env:
         SUKISU_APK_KEYSTORE: ${{ secrets.SUKISU_APK_KEYSTORE }}
         SUKISU_APK_PASSWORD: ${{ secrets.SUKISU_APK_PASSWORD }}
+        KSU_PACKAGE_NAME: ${{ needs.prebuild-manager-sources.outputs[format('{0}_manager_package', matrix.slot)] }}
         KSU_SHORT: ${{ needs.prebuild-manager-sources.outputs[format('{0}_ksu_short', matrix.slot)] }}
         KSU_REF: ${{ needs.prebuild-manager-sources.outputs[format('{0}_ksu_ref', matrix.slot)] }}
         KSU_BRANCH: ${{ needs.prebuild-manager-sources.outputs[format('{0}_effective_ksu_branch', matrix.slot)] }}
@@ -2153,6 +2157,7 @@ jobs:
       if: needs.prebuild-manager-sources.outputs[format('{0}_manager_adoption', matrix.slot)] == ''
     - name: 记录管理器真实版本
       env:
+        KSU_PACKAGE_NAME: ${{ needs.prebuild-manager-sources.outputs[format('{0}_manager_package', matrix.slot)] }}
         META_FILE: ${{ steps.sign.outputs.apk_filename }}
         META_PACKAGE: ${{ steps.sign.outputs.manager_package }}
         META_KSU_VERSION_CODE: ${{ steps.sign.outputs.manager_version_code }}

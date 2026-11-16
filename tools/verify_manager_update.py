@@ -20,6 +20,7 @@ from check_official_updates import validate_snapshot
 from manager_variants import MANAGERS, manager_profile
 from official_manager_versions import NETWORK, _gradle_version
 from prepare_manager_lkm import native_version_code
+from resolve_build_sources import github_transport_repository
 from snapshot_ksu_source import git, temporary_directory, SnapshotError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,7 +72,7 @@ def source_repository(cache: Path, variant: str) -> Path:
             'objects/info/alternates', 'objects/info/http-alternates')):
         raise ManagerUpdateError('Manager compatibility cache must contain complete independent history')
     (target / 'config').write_text('[core]\n\trepositoryformatversion = 0\n\tbare = true\n'
-        '[remote "origin"]\n\turl = https://github.com/' + repository + '.git\n',
+        '[remote "origin"]\n\turl = https://github.com/' + github_transport_repository(repository) + '.git\n',
         encoding='utf-8', newline='\n')
     if git(target, 'rev-parse', '--is-bare-repository') != 'true':
         raise ManagerUpdateError('Manager compatibility cache must be bare')

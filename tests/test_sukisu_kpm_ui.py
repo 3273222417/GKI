@@ -3,10 +3,26 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from configure_sukisu_kpm_ui import configure, ENTRY, GUARD, JAVA, MARKER, SCREEN
+from configure_sukisu_kpm_ui import authorization_guard, configure, ENTRY, MARKER
 
 
 ROOT = Path(__file__).resolve().parents[1]
+ULTRA = 'com.sukisu.ultra'
+NOVA = 'com.sukisu.nova'
+JAVA = 'manager/app/src/main/java/com/sukisu/ultra'
+ULTRA_GUARD = authorization_guard(ULTRA)
+NOVA_CATALOG = '''package com.sukisu.nova.ui.viewmodel
+
+import kotlinx.coroutines.CancellationException
+
+class ExtensionsViewModel {
+    private suspend fun loadItems(): Result<List<ExtensionItem>> = try {
+        Result.success(withContext(Dispatchers.IO) { repo.probeAll().map(::toItem) })
+    } catch (e: CancellationException) {
+        throw e
+    }
+}
+'''
 NATIVE_SCREEN = '''package com.sukisu.ultra.ui.screen.kpm
 
 import kotlinx.coroutines.CancellationException
@@ -50,14 +66,31 @@ fun rootAvailable(): Boolean {
 
 
 class SukiKpmUiTests(unittest.TestCase):
-    def source(self, root, screen=NATIVE_SCREEN, newline='\n'):
-        for relative, text in (('kernel/Kbuild', 'REPO_NAME   := SukiSU-Ultra\n'),
-                               (JAVA + '/Natives.kt', NATIVES),
-                               (JAVA + '/ui/util/KsuCli.kt', KSU_CLI), (SCREEN, screen)):
+    def source(self, root, screen=NATIVE_SCREEN, newline='\n', namespace=ULTRA):
+        java = 'manager/app/src/main/java/' + namespace.replace('.', '/')
+        kbuild = 'REPO_NAME   := SukiSU-' + namespace.rsplit('.', 1)[-1].title() + '\n'
+        gradle = f'''val defaultManagerPackageName = if (isPrBuild) "{namespace}.pr" else "{namespace}"
+val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName
+android {{
+    namespace = "{namespace}"
+    defaultConfig {{
+        applicationId = managerPackageName
+    }}
+}}
+'''
+        page = java + '/ui/screen/kpm/KpmScreen.kt'
+        for relative, text in (('kernel/Kbuild', kbuild), ('manager/app/build.gradle.kts', gradle),
+                               (java + '/Natives.kt', NATIVES.replace(ULTRA, namespace)),
+                               (java + '/ui/util/KsuCli.kt', KSU_CLI.replace(ULTRA, namespace)),
+                               (page, screen.replace(ULTRA, namespace))):
             path = root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(text.replace('\n', newline).encode('utf-8'))
-        return root / SCREEN
+        if namespace == NOVA:
+            catalog = root / java / 'ui/viewmodel/ExtensionsViewModel.kt'
+            catalog.parent.mkdir()
+            catalog.write_text(NOVA_CATALOG, encoding='utf-8', newline=newline)
+        return root / page
 
     def test_authorization_precedes_all_native_work_and_other_bytes_are_preserved(self):
         for newline in ('\n', '\r\n'):
@@ -67,7 +100,7 @@ class SukiKpmUiTests(unittest.TestCase):
                 original = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
                 self.assertTrue(configure(root))
                 updated = page.read_bytes()
-                gate = GUARD.replace('\n', newline).encode('utf-8')
+                gate = ULTRA_GUARD.replace('\n', newline).encode('utf-8')
                 self.assertEqual(original[page], updated.replace(gate, b'', 1))
                 self.assertEqual(1, updated.count(MARKER.encode()))
                 normalized = updated.decode('utf-8').replace('\r\n', '\n')
@@ -86,9 +119,9 @@ class SukiKpmUiTests(unittest.TestCase):
                 self.assertEqual(updated, page.read_bytes())
 
     def test_altered_or_partial_guard_is_rejected_without_changing_source(self):
-        for guard in (GUARD.replace('com.sukisu.ultra.Natives.isManager &&\n', ''),
-                      GUARD.replace('throw cancelled', 'false'),
-                      GUARD.replace(' &&\n            com.sukisu.ultra.ui.util.rootAvailable()', '')):
+        for guard in (ULTRA_GUARD.replace('com.sukisu.ultra.Natives.isManager &&\n', ''),
+                      ULTRA_GUARD.replace('throw cancelled', 'false'),
+                      ULTRA_GUARD.replace(' &&\n            com.sukisu.ultra.ui.util.rootAvailable()', '')):
             with self.subTest(guard=guard), tempfile.TemporaryDirectory(prefix='.sukisu-kpm-', dir=ROOT / 'tests') as directory:
                 root = Path(directory)
                 page = self.source(root, NATIVE_SCREEN.replace(ENTRY, ENTRY + guard, 1))
@@ -96,6 +129,21 @@ class SukiKpmUiTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'altered'):
                     configure(root)
                 self.assertEqual(original, page.read_bytes())
+
+    def test_nova_uses_the_same_early_root_guard_in_its_native_namespace(self):
+        with tempfile.TemporaryDirectory(prefix='.sukisu-kpm-', dir=ROOT / 'tests') as directory:
+            root = Path(directory)
+            page = self.source(root, namespace=NOVA)
+            self.assertTrue(configure(root))
+            updated = page.read_text('utf-8')
+            self.assertEqual(updated, NATIVE_SCREEN.replace(ULTRA, NOVA).replace(
+                ENTRY, ENTRY + authorization_guard(NOVA), 1))
+            catalog = root / 'manager/app/src/main/java/com/sukisu/nova/ui/viewmodel/ExtensionsViewModel.kt'
+            listing = catalog.read_text('utf-8')
+            self.assertIn('it.wireName != "kpm" || try {', listing)
+            self.assertIn(f'{NOVA}.ui.util.rootAvailable()', listing)
+            self.assertIn('}.map(::toItem)', listing)
+            self.assertFalse(configure(root))
 
     def test_unknown_entry_theme_or_authorization_api_requires_review(self):
         for changed in (

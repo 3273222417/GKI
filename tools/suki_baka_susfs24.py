@@ -249,9 +249,10 @@ def integrate(source: Path, dependency: Path, variant: str) -> tuple[Path, ...]:
         POLICY: policy_hooks(original[POLICY], baka_layout=variant == 'BakaSU'),
     }
     if variant == 'SukiSU':
-        # The verified SUSFS direct-hook port does not link hook/lsm_hook.o.
+        # Nova keeps the reviewed LSM provider for its separate inode label hook.
         original[CORE_INIT] = read(source, CORE_INIT)
-        updated[CORE_INIT] = remove_unlinked_lsm_init(original[CORE_INIT])
+        if not re.search(r'(?m)^kernelsu-objs\s*\+=\s*hook/lsm_hook\.o\s*$', read(source, 'kernel/Kbuild')):
+            updated[CORE_INIT] = remove_unlinked_lsm_init(original[CORE_INIT])
         original[RUNTIME] = read(source, RUNTIME)
         updated[RUNTIME] = remove_unlinked_input_work(original[RUNTIME])
         original[HIDE] = read(source, HIDE)

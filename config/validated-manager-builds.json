@@ -3,11 +3,11 @@
   "channels": {
     "SukiSU": {
       "Stable(标准)": {
-        "reference": "645ef9860b9b7f900bb5d1b27e224f2c311d39c0",
-        "source_branch": "v4.3.0-r2"
+        "reference": "c60f21b9e00e35e898f8d21e0612465b76b9beec",
+        "source_branch": "v3.0.0"
       },
       "Latest(最新)": {
-        "reference": "dae36db016079546b9fc028636a3326d09979777",
+        "reference": "c60f21b9e00e35e898f8d21e0612465b76b9beec",
         "source_branch": "main"
       }
     },

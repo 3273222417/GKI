@@ -15,7 +15,7 @@ from embedded_build_metadata import (APK_MEMBER, KERNEL_MEMBER, metadata_json, r
                                      official_receipt_from_environment)
 from package_release_kernel import AK3_NAME, read_kernel_ak3
 from release_notes import asset_names, render_notes
-from manager_variants import MANAGERS
+from manager_variants import MANAGERS, manager_display_name
 from kernel_order import kernel_key, natural_key
 
 
@@ -106,7 +106,8 @@ def release_title(manager: dict | None, *, platform: str = 'Android') -> str:
         raise ValueError('Release platform must be Android or OnePlus')
     if manager is None:
         return platform + ' Kernel Release'
-    variant = manager.get('ksu_variant', 'SukiSU')
+    variant = manager_display_name(manager.get('ksu_variant', 'SukiSU'),
+                                   manager.get('package', manager.get('manager_package')))
     version = manager.get('ksu_version_code')
     if (type(version) not in (str, int) or not re.fullmatch(r'[1-9][0-9]*', str(version))
             or int(version) > 2_100_000_000):

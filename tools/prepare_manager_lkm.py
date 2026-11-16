@@ -21,7 +21,7 @@ import tempfile
 
 from snapshot_ksu_source import SnapshotError, expected_commit, git, source_identity
 from manager_lkm_jobs import load_ddk_matrix
-from manager_variants import manager_profile, selected_variant
+from manager_variants import manager_profile, manager_source_package, selected_variant
 
 
 KMI = re.compile(r"android[0-9]+-[0-9]+\.[0-9]+\Z")
@@ -386,9 +386,9 @@ def record(source: Path, module: Path, kmi: str, identity_file: Path, reference:
            output: Path, ddk_image: str) -> dict:
     source = source.resolve(strict=True)
     identity = public_identity(identity_file)
-    if identity['manager_package'] != manager_profile(selected_variant())['package']:
-        raise LkmError('LKM manager package does not match the selected manager variant')
     provenance = selected_source(source, reference)
+    if identity['manager_package'] != manager_source_package(selected_variant(), source):
+        raise LkmError('LKM manager package does not match the selected manager variant and source')
     locked_ddk(kmi, ddk_image)
     inspected = inspect_module(module, kmi, identity, provenance["ksu_ref"])
     version_proof = compile_version_proof(source, provenance["ksu_version_code"])
@@ -415,9 +415,9 @@ def stage(source: Path, artifacts: Path, identity_file: Path, reference: str,
           expected_kmis: str, report: Path) -> dict:
     source, artifacts = source.resolve(strict=True), artifacts.resolve(strict=True)
     identity = public_identity(identity_file)
-    if identity['manager_package'] != manager_profile(selected_variant())['package']:
-        raise LkmError('LKM manager package does not match the selected manager variant')
     provenance = selected_source(source, reference)
+    if identity['manager_package'] != manager_source_package(selected_variant(), source):
+        raise LkmError('LKM manager package does not match the selected manager variant and source')
     required = expected_kmis.split(",")
     if (not 1 <= len(required) <= 32 or len(required) != len(set(required))
             or any(not KMI.fullmatch(kmi) for kmi in required)):

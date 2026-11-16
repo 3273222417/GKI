@@ -175,8 +175,9 @@ def check_official_source(source: Path, variant: str = 'SukiSU') -> None:
     # header is intentionally left local. Also reject credential-bearing URLs.
     urls = git(source, "remote", "get-url", "--all", "origin").splitlines()
     repository = manager_profile(variant)['repository']
-    allowed = {f"https://github.com/{repository}", f"https://github.com/{repository}.git",
-               f"git@github.com:{repository}.git", f"git@github.com:{repository}"}
+    from resolve_build_sources import github_transport_repository
+    allowed = {base + name + suffix for name in (repository, github_transport_repository(repository))
+               for base in ('https://github.com/', 'git@github.com:') for suffix in ('', '.git')}
     if not urls or any(url not in allowed for url in urls):
         raise SnapshotError("SukiSU source origin must be the official public repository without URL credentials")
     if git(source, "status", "--porcelain", "--untracked-files=all"):
@@ -228,6 +229,11 @@ def snapshot_source(source: Path, output: Path, reference: str, *, root: Path = 
         raise SnapshotError("SukiSU snapshot parent directory does not exist")
     check_official_source(source, variant)
     identity = source_identity(source, reference)
+    if variant == 'SukiSU' and git(source, 'tag', '--list', 'manager-ci'):
+        # This moving prerelease tag can shadow the actual version in Git
+        # describe. Exclude it from the isolated checkout and source bundle.
+        git(source, 'update-ref', '-d', 'refs/tags/manager-ci')
+        identity = source_identity(source, reference)
     if variant == 'SukiSU' and tier == 'Stable(标准)':
         from approved_manager_builds import APPROVED_PATH, STABLE, read_approved
         if (root / APPROVED_PATH).is_file():

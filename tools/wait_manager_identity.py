@@ -19,7 +19,7 @@ import zipfile
 from urllib.parse import quote, unquote
 
 from embedded_build_metadata import MAX_APK_BYTES, read_manager_apk, validate_members
-from manager_variants import MANAGERS, manager_profile
+from manager_variants import MANAGERS, manager_package, manager_profile
 
 
 MAX_ARCHIVE_BYTES = MAX_APK_BYTES
@@ -78,10 +78,11 @@ class Expected:
     variant: str = 'SukiSU'
     manager_job_id: int | None = None
     external_metadata: dict | None = None
+    package: str | None = None
 
     def validate(self):
         try:
-            manager_profile(self.variant)
+            manager_package(self.variant, self.package)
         except ValueError as error:
             raise IdentityError(str(error)) from None
         validate_repository(self.repository)
@@ -167,7 +168,7 @@ def validate_metadata(metadata: dict, expected: Expected, *,
     package, filename = metadata["package"], metadata["file"]
     if not isinstance(package, str) or len(package) > 255 or not PACKAGE.fullmatch(package):
         raise IdentityError("Invalid signed manager Android package ID")
-    if package != manager_profile(expected.variant)['package']:
+    if package != manager_package(expected.variant, expected.package):
         raise IdentityError("Signed manager package differs from the selected upstream application ID")
     if not isinstance(filename, str) or len(filename) > 240 or not APK_NAME.fullmatch(filename):
         raise IdentityError("Invalid signed manager APK filename")
@@ -468,6 +469,8 @@ def main():
     parser.add_argument("--head-sha", default=os.environ.get("GITHUB_SHA", ""))
     parser.add_argument("--manager-job-name", default=None)
     parser.add_argument('--variant', choices=MANAGERS, default=os.environ.get('KSU_VARIANT', 'SukiSU'))
+    parser.add_argument('--package', default=os.environ.get('KSU_PACKAGE_NAME'),
+                        help='Application ID from the selected source, before reading the APK')
     parser.add_argument('--manager-metadata', default=os.environ.get('GKI_MANAGER_METADATA', ''),
                         help='Trusted official APK producer output; never read from an unsigned sidecar')
     parser.add_argument("--github-env", type=Path, default=os.environ.get("GITHUB_ENV"))
@@ -500,7 +503,8 @@ def main():
                             manager_job, args.variant,
                             positive_integer(args.manager_job_id, 'manager producer job ID')
                             if args.manager_job_id is not None else None,
-                            json.loads(args.manager_metadata) if args.manager_metadata else None)
+                            json.loads(args.manager_metadata) if args.manager_metadata else None,
+                            args.package)
         values = wait_for_identity(expected, GitHubReader(expected.repository),
                                    timeout=args.timeout, interval=args.interval)
         write_environment(args.github_env, values)

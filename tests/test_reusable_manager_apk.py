@@ -17,6 +17,7 @@ from reusable_manager_apk import (cache_key, main, manager_selection, native_pro
                                   stage, validate_adoption)
 from sign_sukisu_manager import SigningError, sign_manager
 from test_additional_managers import manifest
+from wait_manager_identity import Expected, IdentityError, validate_metadata
 
 
 class ReusableManagerApkTests(unittest.TestCase):
@@ -71,6 +72,27 @@ class ReusableManagerApkTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'selection fields'):
             validate_adoption({**receipt, 'selection': incomplete}, signed, consumer=self.consumer,
                               selection=incomplete)
+
+    def test_nova_cache_and_kernel_identity_require_the_matching_package(self):
+        filename, package = 'SukiSU_Nova_v3.0.0_30000-release.apk', 'com.sukisu.nova'
+        selection = {**self.selection, 'package': package}
+        manager = {**self.identity, 'file': filename, 'package': package,
+                   'ksu_version_code': '30000', 'ksu_version_name': 'v3.0.0'}
+        data = signed_apk(manager, manifest_bytes=manifest(package, code=30000, version='v3.0.0'))
+        (self.cache / filename).write_bytes(data)
+        self.assertNotEqual(cache_key(selection), cache_key(self.selection))
+        with self.assertRaisesRegex(ValueError, 'differs'):
+            stage(self.cache, self.output, consumer=self.consumer, selection=self.selection)
+        result = stage(self.cache, self.output, consumer=self.consumer, selection=selection)
+        self.assertEqual(package, result['manager_package'])
+        self.assertEqual(30000, result['manager_version_code'])
+        metadata = read_manager_apk(data, filename=filename)
+        expected = Expected('cyzrqh/gki', 123, 1, 'a' * 40, 'b' * 40, package=package)
+        self.assertEqual(package, validate_metadata(metadata, expected)['MANAGER_PACKAGE'])
+        with self.assertRaisesRegex(IdentityError, 'application ID'):
+            validate_metadata(metadata, Expected('cyzrqh/gki', 123, 1, 'a' * 40, 'b' * 40))
+        with self.assertRaisesRegex(ValueError, 'different variant'):
+            read_manager_apk(signed_apk({**manager, 'package': self.identity['package']}), filename=filename)
 
     def test_wrong_signer_source_recipe_or_native_proof_cannot_reuse(self):
         self.cache_apk()

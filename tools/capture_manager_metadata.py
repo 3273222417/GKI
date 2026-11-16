@@ -50,7 +50,7 @@ def main():
                         positive_integer(fields['producer_run_id'], 'producer run ID'),
                         positive_integer(fields['producer_run_attempt'], 'producer run attempt'),
                         fields['producer_head_sha'], fields['ksu_ref'],
-                        fields['file'], variant=variant)
+                        fields['file'], variant=variant, package=os.environ.get('KSU_PACKAGE_NAME'))
     expected.validate()
     validate_metadata(fields, expected)
     args.output.parent.mkdir(parents=True, exist_ok=True)

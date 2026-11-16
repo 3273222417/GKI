@@ -14,5 +14,7 @@ tests/fixtures/oplus-susfs66/namespace-header.c -whitespace
 tests/fixtures/oplus-vendor-locking/*.source -whitespace
 # Reviewed Git merge preimages retain their exact official bytes.
 tools/patches/sukisu-susfs23-base/*.source -whitespace
+# The Nova port's exact context includes tab-indented Kconfig and Make rules.
+tools/patches/sukisu-susfs23-nova.patch whitespace=-space-before-tab
 # Preserve literal context whitespace in the reviewed KowSU unified diff.
 tools/patches/kow-susfs23-inode.patch -whitespace

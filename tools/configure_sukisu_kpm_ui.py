@@ -7,25 +7,37 @@ from pathlib import Path
 import re
 import sys
 
+from manager_variants import manager_source_package
 
-NAMESPACE = 'com.sukisu.ultra'
-JAVA = 'manager/app/src/main/java/' + NAMESPACE.replace('.', '/')
-SCREEN = JAVA + '/ui/screen/kpm/KpmScreen.kt'
 MARKER = 'GKI_SUKISU_KPM_AUTHORIZATION_V1'
 ENTRY = 'fun KpmScreen(bottomInnerPadding: Dp = 0.dp) {\n'
-GUARD = '''    // GKI_SUKISU_KPM_AUTHORIZATION_V1
-    val kpmAuthorized = try {
-        com.sukisu.ultra.Natives.isManager &&
-            com.sukisu.ultra.Natives.isFullFeatured() &&
-            com.sukisu.ultra.ui.util.rootAvailable()
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (_: Exception) {
-        false
-    }
-    if (!kpmAuthorized) return
-
+AUTHORIZATION = '''try {{
+    {namespace}.Natives.isManager &&
+        {namespace}.Natives.isFullFeatured() &&
+        {namespace}.ui.util.rootAvailable()
+}} catch (cancelled: CancellationException) {{
+    throw cancelled
+}} catch (_: Exception) {{
+    false
+}}'''
+NOVA_EXTENSION_LOAD = '        Result.success(withContext(Dispatchers.IO) { repo.probeAll().map(::toItem) })\n'
+NOVA_EXTENSION_LOAD_GUARDED = '''        Result.success(withContext(Dispatchers.IO) {{
+            repo.probeAll().filter {{
+                // GKI_SUKISU_KPM_AUTHORIZATION_V1
+                it.wireName != "kpm" || {authorization}
+            }}.map(::toItem)
+        }})
 '''
+
+
+def authorization(namespace: str, indent: int) -> str:
+    return AUTHORIZATION.format(namespace=namespace).replace('\n', '\n' + ' ' * indent)
+
+
+def authorization_guard(namespace: str) -> str:
+    return (f'    // {MARKER}\n'
+            f'    val kpmAuthorized = {authorization(namespace, 4)}\n'
+            '    if (!kpmAuthorized) return\n\n')
 
 
 def read_source(root: Path, relative: str) -> tuple[Path, bytes, str, str]:
@@ -46,11 +58,11 @@ def read_source(root: Path, relative: str) -> tuple[Path, bytes, str, str]:
     return path, raw, text, newline
 
 
-def verify_native_entry(text: str) -> None:
+def verify_native_entry(text: str, namespace: str) -> None:
     # Keep the real native Material/Miuix screens, module operations and polling.
     # Refuse a moved entry or work placed before the known first context read.
     expected = (
-        'package ' + NAMESPACE + '.ui.screen.kpm\n',
+        'package ' + namespace + '.ui.screen.kpm\n',
         'import kotlinx.coroutines.CancellationException\n',
         ENTRY + '    val context = LocalContext.current\n',
         '    val scope = rememberCoroutineScope()\n',
@@ -71,36 +83,48 @@ def configure(source: Path) -> bool:
     if source.is_symlink() or (hasattr(source, 'is_junction') and source.is_junction()) or not source.is_dir():
         raise ValueError('Expected an independent SukiSU source directory')
     root = source.resolve(strict=True)
-    _, _, kbuild, _ = read_source(root, 'kernel/Kbuild')
-    if not re.search(r'(?m)^REPO_NAME\s*:=\s*SukiSU-Ultra\s*$', kbuild):
-        raise ValueError('Expected the native SukiSU-Ultra source')
-    _, _, natives, _ = read_source(root, JAVA + '/Natives.kt')
-    if (not re.search(r'(?m)^package ' + re.escape(NAMESPACE) + r'\s*$', natives)
+    namespace = manager_source_package('SukiSU', root)
+    java = 'manager/app/src/main/java/' + namespace.replace('.', '/')
+    guard = authorization_guard(namespace)
+    _, _, natives, _ = read_source(root, java + '/Natives.kt')
+    if (not re.search(r'(?m)^package ' + re.escape(namespace) + r'\s*$', natives)
             or not re.search(r'\bval\s+isManager\s*:\s*Boolean\s+external\s+get\b', natives)
             or not re.search(r'\bfun\s+isFullFeatured\s*\(\s*\)\s*:\s*Boolean\b', natives)):
         raise ValueError('Review changed native SukiSU authorization APIs')
-    _, _, cli, _ = read_source(root, JAVA + '/ui/util/KsuCli.kt')
-    if (not re.search(r'(?m)^package ' + re.escape(NAMESPACE) + r'\.ui\.util\s*$', cli)
+    _, _, cli, _ = read_source(root, java + '/ui/util/KsuCli.kt')
+    if (not re.search(r'(?m)^package ' + re.escape(namespace) + r'\.ui\.util\s*$', cli)
             or len(re.findall(r'\bfun\s+rootAvailable\s*\(\s*\)\s*:\s*Boolean\b', cli)) != 1):
         raise ValueError('Review changed native SukiSU root availability API')
-    path, original, text, newline = read_source(root, SCREEN)
+    path, original, text, newline = read_source(root, java + '/ui/screen/kpm/KpmScreen.kt')
     configured = MARKER in text
     if configured:
-        if text.count(MARKER) != 1 or text.count(ENTRY + GUARD) != 1:
+        if text.count(MARKER) != 1 or text.count(ENTRY + guard) != 1:
             raise ValueError('Review an altered native SukiSU KPM authorization guard')
-        baseline = text.replace(GUARD, '', 1)
+        baseline = text.replace(guard, '', 1)
     else:
         baseline = text
-    verify_native_entry(baseline)
-    if configured:
-        return False
-    updated = baseline.replace(ENTRY, ENTRY + GUARD, 1).replace('\n', newline).encode('utf-8')
+    verify_native_entry(baseline, namespace)
+    updated = baseline.replace(ENTRY, ENTRY + guard, 1).replace('\n', newline).encode('utf-8')
     # This single-file change inserts only the gate. No native theme, command,
     # dialog, root implementation, package identity or ABI is rewritten.
-    if updated.replace(GUARD.replace('\n', newline).encode('utf-8'), b'', 1) != original:
+    if not configured and updated.replace(guard.replace('\n', newline).encode('utf-8'), b'', 1) != original:
         raise ValueError('Native SukiSU KPM authorization changed unrelated source bytes')
-    path.write_bytes(updated)
-    return True
+    outputs = {path: updated} if not configured else {}
+    if namespace == 'com.sukisu.nova':
+        catalog_path, _, catalog, catalog_newline = read_source(root, java + '/ui/viewmodel/ExtensionsViewModel.kt')
+        guarded = NOVA_EXTENSION_LOAD_GUARDED.format(authorization=authorization(namespace, 16))
+        if 'import kotlinx.coroutines.CancellationException\n' not in catalog:
+            raise ValueError('Review changed Nova extension screen authorization APIs')
+        if catalog.count(guarded) == catalog.count(MARKER) == 1 and NOVA_EXTENSION_LOAD not in catalog:
+            pass  # Same native extension probe, with the reviewed KPM filter already applied.
+        elif MARKER not in catalog and catalog.count(NOVA_EXTENSION_LOAD) == 1:
+            limited = catalog.replace(NOVA_EXTENSION_LOAD, guarded, 1)
+            outputs[catalog_path] = limited.replace('\n', catalog_newline).encode('utf-8')
+        else:
+            raise ValueError('Review changed Nova KPM extension card entry')
+    for output, data in outputs.items():
+        output.write_bytes(data)
+    return bool(outputs)
 
 
 def main(argv=None) -> int:

@@ -112,6 +112,16 @@ class KsuSourceSnapshotTests(unittest.TestCase):
         self.restore()
         self.assertEqual(self.reference, self.git(self.destination, 'rev-parse', 'refs/tags/v4.3.0-r2'))
 
+    def test_sukisu_rolling_ci_tag_cannot_shadow_nova_version(self):
+        self.git(self.source, 'tag', 'manager-ci', self.reference)
+        self.git(self.source, 'tag', 'v3.0.0', self.reference)
+        self.assertEqual('manager-ci', self.git(self.source, 'describe', '--tags', '--always'))
+
+        manifest = self.create()
+        self.assertEqual('v3.0.0', manifest['git_describe'])
+        self.restore()
+        self.assertEqual('', self.git(self.destination, 'tag', '--list', 'manager-ci'))
+
     def test_bakasu_snapshot_preserves_original_history_without_applying_sukisu_port(self):
         repository = 'Baka-SU/BakaSU'
         self.git(self.source, 'remote', 'set-url', 'origin', f'https://github.com/{repository}.git')

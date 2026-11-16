@@ -492,15 +492,6 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         MANAGER_RESOLUTION: ${{ needs.select-managers.outputs.resolution }}
       run: python3 tools/resolve_manager_selection.py --source-for "$KSU_VARIANT"
-    - name: 读取固定签名的公开证书
-      id: certificate
-      if: github.event_name == 'workflow_dispatch' && (inputs.operation == '编译内核' || inputs.operation == '仅编译管理器安装包') && ((matrix.variant
-        == 'SukiSU' || matrix.variant == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant == 'KernelSU' ||
-        matrix.variant == 'KowSU' || matrix.variant == 'FinaSU'))
-      env:
-        SUKISU_APK_KEYSTORE: ${{ secrets.SUKISU_APK_KEYSTORE }}
-        SUKISU_APK_PASSWORD: ${{ secrets.SUKISU_APK_PASSWORD }}
-      run: python3 tools/export_manager_certificate.py --output "$RUNNER_TEMP/manager-public-certificate.json"
     - name: 选择官方镜像修补构建环境
       id: lkm-matrix
       if: github.event_name == 'workflow_dispatch' && (inputs.operation == '编译内核' || inputs.operation == '仅编译管理器安装包') && ((matrix.variant
@@ -521,11 +512,20 @@ jobs:
         == 'SukiSU' || matrix.variant == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant == 'KernelSU' ||
         matrix.variant == 'KowSU' || matrix.variant == 'FinaSU'))
       with:
-        repository: ${{ steps.sources.outputs.ksu_repo }}
+        repository: ${{ matrix.variant == 'SukiSU' && 'SukiSU-Nova/SukiSU-Nova' || steps.sources.outputs.ksu_repo }}
         ref: ${{ steps.sources.outputs.ksu_ref }}
         path: ksu-snapshot-source
         fetch-depth: 0
         persist-credentials: false
+    - name: 核对固定源码的管理器包名并读取公开证书
+      id: certificate
+      if: github.event_name == 'workflow_dispatch' && (inputs.operation == '编译内核' || inputs.operation == '仅编译管理器安装包') && ((matrix.variant
+        == 'SukiSU' || matrix.variant == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant == 'KernelSU' ||
+        matrix.variant == 'KowSU' || matrix.variant == 'FinaSU'))
+      env:
+        SUKISU_APK_KEYSTORE: ${{ secrets.SUKISU_APK_KEYSTORE }}
+        SUKISU_APK_PASSWORD: ${{ secrets.SUKISU_APK_PASSWORD }}
+      run: python3 tools/export_manager_certificate.py --source "$GITHUB_WORKSPACE/ksu-snapshot-source" --output "$RUNNER_TEMP/manager-public-certificate.json"
     - name: 矩阵展开前统一下载并固定 SUSFS
       id: shared-susfs
       if: github.event_name == 'workflow_dispatch' && inputs.operation == '编译内核' && inputs.enable_susfs
@@ -602,6 +602,7 @@ jobs:
       env:
         KSU_BRANCH: ${{ steps.sources.outputs.effective_ksu_branch }}
         KSU_REF: ${{ steps.sources.outputs.ksu_ref }}
+        KSU_PACKAGE_NAME: ${{ steps.certificate.outputs.package }}
         MANAGER_CERT_SIZE: ${{ steps.certificate.outputs.cert_size }}
         MANAGER_CERT_SHA256: ${{ steps.certificate.outputs.cert_sha256 }}
         MANAGER_SOURCE_IDENTITY: ${{ steps.source-identity.outputs.source_identity }}
@@ -627,6 +628,7 @@ jobs:
       env:
         KSU_BRANCH: ${{ steps.sources.outputs.effective_ksu_branch }}
         KSU_REF: ${{ steps.sources.outputs.ksu_ref }}
+        KSU_PACKAGE_NAME: ${{ steps.certificate.outputs.package }}
         MANAGER_CERT_SIZE: ${{ steps.certificate.outputs.cert_size }}
         MANAGER_CERT_SHA256: ${{ steps.certificate.outputs.cert_sha256 }}
         MANAGER_SOURCE_IDENTITY: ${{ steps.source-identity.outputs.source_identity }}
@@ -2170,7 +2172,7 @@ jobs:
         KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
         ORG_GRADLE_PROJECT_KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)]
           }}
-        ORG_GRADLE_PROJECT_KSU_NAME: ${{ matrix.variant }}
+        ORG_GRADLE_PROJECT_KSU_NAME: ${{ matrix.variant != 'SukiSU' && matrix.variant || '' }}
       run: |
         set -euo pipefail
         case "$KSU_VARIANT" in
@@ -2185,6 +2187,7 @@ jobs:
     - name: 实际验证八种 KMI 的镜像修补与恢复
       env:
         KSU_REF: ${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)] }}
+        KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
       run: |
         python3 tools/verify_manager_boot_patch.py --source "$GITHUB_WORKSPACE/manager-source" \
           --module-report "$RUNNER_TEMP/manager-lkm-stage.json" --expected-ref "$KSU_REF" \
@@ -2195,6 +2198,7 @@ jobs:
       env:
         SUKISU_APK_KEYSTORE: ${{ secrets.SUKISU_APK_KEYSTORE }}
         SUKISU_APK_PASSWORD: ${{ secrets.SUKISU_APK_PASSWORD }}
+        KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
         KSU_SHORT: ${{ needs.prepare-matrix.outputs[format('{0}_ksu_short', matrix.variant)] }}
         KSU_REF: ${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)] }}
         KSU_BRANCH: ${{ needs.prepare-matrix.outputs[format('{0}_effective_ksu_branch', matrix.variant)] }}
@@ -2215,6 +2219,7 @@ jobs:
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
     - name: 记录管理器真实版本
       env:
+        KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
         META_FILE: ${{ steps.sign.outputs.apk_filename }}
         META_PACKAGE: ${{ steps.sign.outputs.manager_package }}
         META_KSU_VERSION_CODE: ${{ steps.sign.outputs.manager_version_code }}
@@ -7460,6 +7465,7 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         KSU_REF: ${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)] }}
         KSU_SHORT: ${{ needs.prepare-matrix.outputs[format('{0}_ksu_short', matrix.variant)] }}
+        KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
         MANAGER_JOB_ID: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_job_id', matrix.variant)] }}
         MANAGER_ARTIFACT: ${{ needs.build-sukisu-manager.outputs[format('{0}_apk_filename', matrix.variant)] }}
       run: |

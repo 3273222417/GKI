@@ -91,7 +91,7 @@ def validate_kernel_document(metadata: dict) -> None:
             if not isinstance(metadata.get(field), str) or not re.fullmatch(r'[0-9a-f]{64}', metadata[field]):
                 raise PackagingError('Invalid embedded ' + variant + ' manager digest: ' + field)
         apk = metadata.get('manager_apk_filename')
-        if not valid_manager_apk_filename(apk, variant):
+        if not valid_manager_apk_filename(apk, variant, package=package):
             raise PackagingError('Invalid embedded ' + variant + ' manager APK filename')
     files, boots = metadata.get('files'), metadata.get('boot_sha256')
     prefix = name.removesuffix('-AnyKernel3.zip')

@@ -33,6 +33,7 @@ def configure(workflow):
     identity_env = {
         'KSU_BRANCH': expression('steps.sources.outputs.effective_ksu_branch'),
         'KSU_REF': expression('steps.sources.outputs.ksu_ref'),
+        'KSU_PACKAGE_NAME': expression('steps.certificate.outputs.package'),
         'MANAGER_CERT_SIZE': expression('steps.certificate.outputs.cert_size'),
         'MANAGER_CERT_SHA256': expression('steps.certificate.outputs.cert_sha256'),
         'MANAGER_SOURCE_IDENTITY': expression('steps.source-identity.outputs.source_identity'),

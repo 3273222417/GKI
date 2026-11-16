@@ -87,7 +87,8 @@ class OfficialManagerVersionTests(unittest.TestCase):
         self.assertLessEqual(kwargs['timeout'], 45)
         rewrites = []
         for variant, path in self.upstreams.items():
-            url = 'https://github.com/' + versions.manager_profile(variant)['repository'] + '.git'
+            repository = 'SukiSU-Nova/SukiSU-Nova' if variant == 'SukiSU' else 'Baka-SU/BakaSU'
+            url = 'https://github.com/' + repository + '.git'
             rewrites += ['-c', 'url.' + path.as_uri() + '.insteadOf=' + url]
         return snapshot.git(directory, *rewrites, *args, **kwargs)
 

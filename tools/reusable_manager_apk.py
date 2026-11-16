@@ -18,7 +18,7 @@ import zlib
 from apk_manifest import MAX_MANIFEST, manifest_identity
 from embedded_build_metadata import MAX_APK_BYTES, metadata_json, read_manager_apk
 from manager_lkm_jobs import KMIS
-from manager_variants import MANAGERS, manager_profile
+from manager_variants import MANAGERS, manager_package, manager_profile
 
 
 CHANNELS = ('Stable(标准)', 'Latest(最新)')
@@ -33,7 +33,7 @@ RECIPE_INPUTS = (
     'tools/build_additional_manager.sh', 'tools/build_bakasu_manager.sh',
     'tools/build_fina_manager.py', 'tools/build_manager_extras.sh',
     'tools/build_manager_extras_container.sh', 'tools/build_manager_native.sh',
-    'tools/build_sukisu_manager.sh', 'tools/checkout_ksu_snapshot.py',
+    'tools/build_sukisu_builtzygisk.sh', 'tools/build_sukisu_manager.sh', 'tools/checkout_ksu_snapshot.py',
     'tools/configure_bakasu_kpm_ui.py', 'tools/configure_bakasu_manager_notice.py',
     'tools/configure_sukisu_kpm_ui.py', 'tools/embedded_build_metadata.py',
     'tools/generate_workflow.py', 'tools/kpm_theme.py', 'tools/manager_full_native.py',
@@ -102,8 +102,9 @@ def manager_source_identity(document: dict, ref: str) -> dict:
 
 
 def manager_selection(variant: str, channel: str, ref: str, cert_size: int | str,
-                      cert_sha256: str, recipe_sha256: str, source_identity: dict) -> dict:
-    package = manager_profile(variant)['package']
+                      cert_sha256: str, recipe_sha256: str, source_identity: dict, *,
+                      package: str | None = None) -> dict:
+    package = manager_package(variant, package)
     size = positive(cert_size, 4096)
     if (channel not in CHANNELS or size < 64 or not matches(ref, SHA1)
             or not matches(cert_sha256, SHA256) or not matches(recipe_sha256, SHA256)):
@@ -181,7 +182,8 @@ def validate_cached_metadata(metadata: dict, *, repository: str, selection: dict
         raise ValueError('Invalid cached manager selection fields')
     normalized = manager_selection(selection['ksu_variant'], selection['ksu_branch'], selection['ksu_ref'],
                                    selection['manager_cert_size'], selection['manager_cert_sha256'],
-                                   selection['manager_recipe_sha256'], selection['manager_source_identity'])
+                                   selection['manager_recipe_sha256'], selection['manager_source_identity'],
+                                   package=selection['package'])
     if compact(selection) != compact(normalized):
         raise ValueError('Cached manager selection differs from its canonical identity')
     proof = metadata.get('manager_native_proof')
@@ -263,6 +265,7 @@ def main(argv=None) -> int:
     parser.add_argument('--cert-size', required=True)
     parser.add_argument('--cert-sha256', required=True)
     parser.add_argument('--source-identity', required=True)
+    parser.add_argument('--package', default=os.environ.get('KSU_PACKAGE_NAME'))
     parser.add_argument('--cache-dir', type=Path)
     parser.add_argument('--output-dir', type=Path)
     args = parser.parse_args(argv)
@@ -272,7 +275,7 @@ def main(argv=None) -> int:
         recipe = recipe_hash(args.root)
         source_identity = metadata_json(args.source_identity.encode('utf-8'))
         selection = manager_selection(args.variant, args.channel, args.ksu_ref, args.cert_size, args.cert_sha256,
-                                      recipe, source_identity)
+                                      recipe, source_identity, package=args.package)
         result = {'apk_cache_key': cache_key(selection), 'manager_recipe_sha256': recipe}
         if args.operation == 'stage':
             consumer = workflow_consumer()

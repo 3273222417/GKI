@@ -28,7 +28,7 @@ from manager_lkm_jobs import KMIS
 from prepare_manager_lkm import (LkmError, atomic_json, inspect_module, public_identity,
                                  read_json, selected_source)
 from snapshot_ksu_source import SnapshotError, git
-from manager_variants import manager_profile, selected_variant
+from manager_variants import manager_package, manager_profile, manager_source_package, selected_variant
 from sukisu_cargo_lock import reconcile_sukisu_cargo_lock
 
 
@@ -209,6 +209,8 @@ def validate_assets(source: Path, report_path: Path, reference: str) -> tuple[di
     validate_native_sources(source, reference)
     report = read_json(report_path)
     identity = public_identity(report_path)
+    if identity['manager_package'] != manager_source_package(selected_variant(), source):
+        raise VerificationError('Native LKM application ID differs from the selected manager source')
     if (type(report.get("schema_version")) is not int or report["schema_version"] != 1
             or report.get("mode") != "native-lkm" or report.get("supported_kmis") != sorted(KMIS)
             or any(report.get(key) != value for key, value in provenance.items())):
@@ -243,7 +245,7 @@ def validate_assets(source: Path, report_path: Path, reference: str) -> tuple[di
     return provenance, modules, init
 
 
-def host_environment(source: Path) -> dict[str, str]:
+def host_environment(source: Path, *, package: str | None = None) -> dict[str, str]:
     environment = os.environ.copy()
     # Android-specific global flags can otherwise send ARM64 builtins to the
     # host linker. The explicit host target also overrides Cargo build.target.
@@ -254,7 +256,7 @@ def host_environment(source: Path) -> dict[str, str]:
         environment.pop(key, None)
     environment["CARGO_TARGET_DIR"] = str(source / "target")
     environment["CARGO_TERM_COLOR"] = "never"
-    environment['KSU_PACKAGE_NAME'] = manager_profile(selected_variant())['package']
+    environment['KSU_PACKAGE_NAME'] = manager_package(selected_variant(), package)
     return environment
 
 
@@ -414,10 +416,10 @@ def check_restored(data: bytes, *, configs: dict[str, Entry] | None = None) -> N
         raise VerificationError("Official boot-restore did not restore the original synthetic init and remove the module")
 
 
-def build_host_ksud(source: Path, native_source: Path) -> dict[str, str]:
-    environment = host_environment(source)
-    manifest = native_source / "userspace/ksud/Cargo.toml"
+def build_host_ksud(source: Path, native_source: Path, *, package: str | None = None) -> dict[str, str]:
     variant = selected_variant()
+    environment = host_environment(source, package=package)
+    manifest = native_source / "userspace/ksud/Cargo.toml"
     if variant == 'SukiSU':
         try:
             reconcile_sukisu_cargo_lock(native_source, HOST, environment=environment)
@@ -453,7 +455,8 @@ def verify(source: Path, report_path: Path, reference: str, output: Path) -> dic
     fixture = output / "synthetic-format-only-do-not-flash.img"
     fixture_bytes = boot_v4(synthetic_kernel(), newc({"init": Entry(stat.S_IFREG | 0o755, FIXTURE_INIT)}))
     fixture.write_bytes(fixture_bytes)
-    environment = build_host_ksud(source, native_source)
+    environment = build_host_ksud(source, native_source,
+                                  package=manager_source_package(selected_variant(), native_source))
     ksud = target / HOST / "release/ksud"
     host_binary = regular_bytes(ksud, MAX_IMAGE)
     if (len(host_binary) < 64 or host_binary[:7] != b"\x7fELF\x02\x01\x01"

@@ -31,9 +31,14 @@ class ManagerLkmTests(unittest.TestCase):
             self.git(*arguments)
         (self.source / 'kernel').mkdir()
         (self.source / 'kernel/Kbuild').write_text(
-            'kernelsu-objs := original.o\nVERSION_BASE := 40000\nVERSION_OFFSET := 2815\n'
+            'kernelsu-objs := original.o\nREPO_NAME := SukiSU-Ultra\nVERSION_BASE := 40000\nVERSION_OFFSET := 2815\n'
             'KSU_VERSION := $(if $(LOCAL_COUNT),$(shell expr $(VERSION_BASE) + $(LOCAL_COUNT) - $(VERSION_OFFSET)),41000)\n',
             encoding='utf-8')
+        gradle = self.source / 'manager/app/build.gradle.kts'
+        gradle.parent.mkdir(parents=True)
+        gradle.write_text('val defaultManagerPackageName = if (isPrBuild) "com.sukisu.ultra.pr" else "com.sukisu.ultra"\n'
+                          'val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName\n'
+                          'namespace = "com.sukisu.ultra"\napplicationId = managerPackageName\n', encoding='utf-8')
         self.assets = self.source / 'userspace/ksud/bin/aarch64'
         self.assets.mkdir(parents=True)
         (self.assets / 'busybox').write_bytes(b'original busybox')

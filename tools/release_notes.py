@@ -12,6 +12,7 @@ import re
 import sys
 
 from kernel_order import kernel_key
+from manager_variants import manager_display_name
 
 
 UNKNOWN = "未知"
@@ -218,6 +219,9 @@ def render_notes(manager: dict | None, kernels: list[dict], *, generated_at: dat
                                ("源码提交", ("ksu_ref", "source_ref")),
                                ("配置来源", ("config_source",))):
             values = [first(document, *aliases) for document in kernels]
+            if label == 'KernelSU 变体':
+                values = [manager_display_name(value, document.get('manager_package'))
+                          for document, value in zip(kernels, values)]
             lines.append(f"| {label} | {grouped_value(kernels, values)} |")
         lines.append(f"| KernelSU 版本 | {grouped_value(kernels, [version(document) for document in kernels])} |")
         for number, (label, aliases) in enumerate(FEATURES):
@@ -244,7 +248,9 @@ def render_notes(manager: dict | None, kernels: list[dict], *, generated_at: dat
                         else "本次仅发布管理器安装包，没有内核构建。")
         lines.append(only_manager if manager_assets else "未记录内核构建目标或管理器安装包。")
         if manager:
-            lines.extend(("", f"管理器：{escape(first(manager, 'ksu_variant', 'variant'))}，"
+            name = manager_display_name(first(manager, 'ksu_variant', 'variant'),
+                                        first(manager, 'package', 'manager_package'))
+            lines.extend(("", f"管理器：{escape(name)}，"
                           f"分支 {escape(first(manager, 'ksu_branch', 'tier', 'branch'))}。"
                           + ("内核功能配置不适用于本次 APK 构建。" if report_kind == 'actions'
                              else "内核功能配置不适用于本次 APK 发布。")))

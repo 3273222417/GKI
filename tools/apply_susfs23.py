@@ -125,7 +125,7 @@ def verify_patch_memory_sources(repository: Path) -> None:
             raise ValueError(f"Incomplete SukiSU text patch implementation in {relative}")
 
 
-def verify_patch_memory_build(kbuild: str) -> None:
+def verify_patch_memory_build(kbuild: str, *, nova_selinux: bool = False) -> None:
     """The direct hook port still needs SukiSU mount hiding's arch provider."""
     rules = (
         "ifeq ($(CONFIG_ARM64),y)\nkernelsu-objs += hook/arm64/patch_memory.o",
@@ -134,11 +134,35 @@ def verify_patch_memory_build(kbuild: str) -> None:
     )
     if any(rule not in kbuild for rule in rules):
         raise ValueError("SukiSU mount_hide requires the architecture's real patch_memory object in Kbuild")
-    if any(f"kernelsu-objs += {object_name}" in kbuild for object_name in (
-        "hook/lsm_hook.o", "hook/syscall_hook_manager.o", "hook/syscall_event_bridge.o",
+    lsm = re.findall(r'(?m)^kernelsu-objs\s*\+=\s*hook/lsm_hook\.o\s*$', kbuild)
+    if len(lsm) != int(nova_selinux) or any(f"kernelsu-objs += {object_name}" in kbuild for object_name in (
+        "hook/syscall_hook_manager.o", "hook/syscall_event_bridge.o",
         "hook/arm64/syscall_hook.o", "hook/x86_64/syscall_hook.o", "hook/riscv64/syscall_hook.o",
     )):
         raise ValueError("Legacy syscall hook registration must not replace SUSFS 2.3 direct hooks")
+
+
+def verify_native_nova_selinux(repository: Path, core: str) -> bool:
+    """Keep Nova's native inode label operation alongside the SUSFS direct hooks."""
+    kbuild = git(repository, 'show', 'HEAD:kernel/Kbuild')
+    if kbuild.returncode or not re.search(r'(?m)^REPO_NAME[ \t]*:=[ \t]*SukiSU-Nova[ \t]*$', kbuild.stdout):
+        return False
+    relative = 'kernel/feature/selinux_hide.c'
+    original = git(repository, 'show', 'HEAD:' + relative)
+    if original.returncode or git(repository, 'diff', '--quiet', 'HEAD', '--',
+                                  'kernel/hook/lsm_hook.c', 'kernel/hook/lsm_hook.h').returncode:
+        raise ValueError('Nova must retain its native SELinux hook provider')
+    current = (repository / relative).read_text(encoding='utf-8')
+    native_label_hook = re.compile(r'(?ms)^static int \(\*inode_doinit_with_dentry_fn\).*?'
+                                   r'(?=^(?:static )?DEFINE_STATIC_KEY_FALSE\(fake_status_initialize_key\);)')
+    before, after = native_label_hook.findall(original.stdout), native_label_hook.findall(current)
+    if len(before) != 1 or after != before:
+        raise ValueError('Nova must retain its native SELinux inode label authorization and audit path')
+    calls = re.findall(r'\bksu_lsm_(?:un)?hook\(\s*&([a-z_]+)\s*\)', strip_comments_and_literals(current))
+    lifecycle = re.findall(r'\bksu_lsm_hook_(init|exit)\s*\(\s*\)', strip_comments_and_literals(core))
+    if calls != ['selinux_inode_setxattr_hook'] * 3 or lifecycle != ['init', 'exit']:
+        raise ValueError('Nova SELinux inode label hooks must keep their native lifecycle')
+    return True
 
 
 def verify_blacklist_lifecycle(core: str, runtime: str) -> None:
@@ -269,8 +293,10 @@ def verify_native_selinux_inode(repository: Path) -> None:
 
 def verify_integration(repository: Path) -> None:
     source = repository / "kernel"
+    core = (source / "core/init.c").read_text(encoding="utf-8")
     verify_patch_memory_sources(repository)
-    verify_patch_memory_build((source / "Kbuild").read_text(encoding="utf-8"))
+    verify_patch_memory_build((source / "Kbuild").read_text(encoding="utf-8"),
+                              nova_selinux=verify_native_nova_selinux(repository, core))
     verify_native_avc(repository)
     verify_native_rcu_allowlist(repository)
     verify_native_selinux_inode(repository)
@@ -283,8 +309,7 @@ def verify_integration(repository: Path) -> None:
         current = strip_comments_and_literals((source / 'hook/setuid_hook.c').read_text(encoding='utf-8'))
         if len(re.findall(r'\bpr_info\s*\(', current)) > len(re.findall(r'\bpr_info\s*\(', original)):
             raise ValueError('SUSFS hook port must preserve upstream setuid logging cleanup')
-    verify_blacklist_lifecycle((source / "core/init.c").read_text(encoding="utf-8"),
-                               (source / "runtime/ksud_integration.c").read_text(encoding="utf-8"))
+    verify_blacklist_lifecycle(core, (source / "runtime/ksud_integration.c").read_text(encoding="utf-8"))
     original_blacklist = git(repository, "diff", "--quiet", "HEAD", "--",
                              "kernel/feature/module_blacklist.c", "kernel/feature/module_blacklist.h")
     if original_blacklist.returncode:
@@ -458,7 +483,8 @@ def apply_reviewed_port(repository: Path, patch: Path, *, allow_variants: bool =
     patch = patch.resolve(strict=True)
     candidates = [patch]
     if allow_variants:
-        for name in ("sukisu-susfs23-avc.patch", "sukisu-susfs23-avc-rcu.patch", "sukisu-susfs23-quiet.patch"):
+        for name in ("sukisu-susfs23-avc.patch", "sukisu-susfs23-avc-rcu.patch", "sukisu-susfs23-quiet.patch",
+                     "sukisu-susfs23-nova.patch"):
             variant = patch.with_name(name)
             if variant.is_file() and variant.resolve() not in candidates:
                 candidates.append(variant.resolve(strict=True))

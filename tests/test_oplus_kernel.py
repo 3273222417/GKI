@@ -31,6 +31,12 @@ class OPlusKernelTests(unittest.TestCase):
         self.ksu.mkdir(parents=True)
         (self.root / 'KernelSU/.git').mkdir()
         (self.ksu / 'Kconfig').write_text('config KSU\nconfig KPM\nconfig KSU_KPROBES_HOOK\nconfig KSU_TRACEPOINT_HOOK\n')
+        (self.ksu / 'Kbuild').write_text('REPO_NAME := SukiSU-Ultra\n', encoding='utf-8')
+        gradle = self.root / 'KernelSU/manager/app/build.gradle.kts'
+        gradle.parent.mkdir(parents=True)
+        gradle.write_text('val defaultManagerPackageName = if (isPrBuild) "com.sukisu.ultra.pr" else "com.sukisu.ultra"\n'
+                          'val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName\n'
+                          'namespace = "com.sukisu.ultra"\napplicationId = managerPackageName\n', encoding='utf-8')
         self.reference = 'a' * 40
         self.profile = {
             'id': 'sm8650-6.1.141', 'platform': 'sm8650', 'kernel': '6.1.141',

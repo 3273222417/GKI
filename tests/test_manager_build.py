@@ -109,7 +109,7 @@ class ManagerBuildNativeAssetsTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.directory)
         self.script = (ROOT / 'tools/build_sukisu_manager.sh').read_text(encoding='utf-8')
         marker = 'python3 - "$source_dir" "$build_tools" <<\'PY\'\n'
-        self.inputs = self.script.split(marker, 1)[1].split('\nPY\n', 1)[0]
+        self.inputs = self.script.rsplit(marker, 1)[1].split('\nPY\n', 1)[0]
         native_script = (ROOT / 'tools/build_manager_native.sh').read_text(encoding='utf-8')
         marker = 'python3 - "$daemon" "$source_dir/userspace/ksud/bin/$arch" "$machine" <<\'PY\'\n'
         self.embedded = native_script.split(marker, 1)[1].split('\nPY\n', 1)[0]
@@ -196,9 +196,10 @@ class ManagerBuildArtifactTests(unittest.TestCase):
         self.inspect = script.split(marker, 1)[1].split('\nPY\n', 1)[0]
         self.badging = "package: name='com.sukisu.ultra' versionCode='41030' versionName='v4.2.1'\n"
 
-    def inspect_artifact(self, badging=None, returncode=0):
+    def inspect_artifact(self, badging=None, returncode=0, *, package='com.sukisu.ultra'):
         result = subprocess.CompletedProcess(['aapt2'], returncode, stdout=badging or self.badging, stderr='')
-        environment = {'ANDROID_HOME': str(self.sdk), 'GITHUB_OUTPUT': str(self.github_output)}
+        environment = {'ANDROID_HOME': str(self.sdk), 'GITHUB_OUTPUT': str(self.github_output),
+                       'KSU_PACKAGE_NAME': package}
         with patch.dict(os.environ, environment), patch.object(sys, 'argv',
                 ['-', str(self.release), str(self.output), str(ROOT / 'tools')]):
             with patch.object(subprocess, 'run', return_value=result) as run, \
@@ -222,6 +223,17 @@ class ManagerBuildArtifactTests(unittest.TestCase):
         self.assertIn('apk_filename=SukiSU_v4.2.1_41030-release.apk\n', outputs)
         self.assertIn('manager_version_name=v4.2.1\n', outputs)
         self.assertIn('manager_version_code=41030\n', outputs)
+
+    def test_nova_artifact_keeps_the_official_package_filename_and_version(self):
+        self.apk = self.apk.rename(self.release / 'SukiSU_Nova_v3.0.0_30000-release-unsigned.apk')
+        nova = "package: name='com.sukisu.nova' versionCode='30000' versionName='v3.0.0'\n"
+        with self.assertRaisesRegex(SystemExit, 'official application ID'):
+            self.inspect_artifact(nova)
+        self.inspect_artifact(nova, package='com.sukisu.nova')
+        metadata = json.loads((self.output / 'manager-build-metadata.json').read_text(encoding='utf-8'))
+        self.assertEqual('com.sukisu.nova', metadata['manager_package'])
+        self.assertEqual('SukiSU_Nova_v3.0.0_30000-release.apk', metadata['apk_filename'])
+        self.assertEqual(30000, metadata['manager_version_code'])
 
     def test_version_metadata_is_read_from_apk_instead_of_filename(self):
         self.apk = self.apk.rename(self.release / 'SukiSU_oldname-release-unsigned.apk')

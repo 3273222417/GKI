@@ -18,7 +18,7 @@ import tempfile
 import zipfile
 
 from embedded_build_metadata import APK_MEMBER, metadata_json, read_member, validate_members, verify_sukisu_apk
-from manager_variants import MANAGERS, manager_profile, selected_variant, valid_manager_apk_filename
+from manager_variants import MANAGERS, manager_package, selected_variant, valid_manager_apk_filename
 from reusable_manager_apk import manager_selection, native_proof
 
 
@@ -160,7 +160,7 @@ def apk_filename(build_metadata: Path, actual: dict[str, str | int], *, variant:
     # official development builds can use manager-ci or a version without v.
     variant = selected_variant(variant)
     for name in (source, output):
-        if not valid_manager_apk_filename(name, variant, allow_unsigned=True):
+        if not valid_manager_apk_filename(name, variant, allow_unsigned=True, package=actual['manager_package']):
             raise SigningError("The manager build metadata must contain safe native " + variant + " APK basenames.")
     if source.endswith('-release-unsigned.apk'):
         expected = source.removesuffix('-unsigned.apk') + '.apk'
@@ -215,8 +215,13 @@ def public_build_identity(actual: dict, certificate: bytes, filename: str, *, le
                 or hashlib.sha256(certificate).hexdigest()
                    != 'c8e9af2b51e0f76b4e9133726c17a8034a131fec4235f6b779ab8b1e83127c12'):
             raise SigningError('Legacy signing is limited to the original fixed 41065 SukiSU identity.')
-    elif actual.get('manager_package') != manager_profile(variant)['package']:
-        raise SigningError('The ' + variant + ' APK package differs from its paired manager profile.')
+    else:
+        try:
+            expected_package = manager_package(variant, os.environ.get('KSU_PACKAGE_NAME'))
+        except ValueError as error:
+            raise SigningError(str(error)) from None
+        if actual.get('manager_package') != expected_package:
+            raise SigningError('The ' + variant + ' APK package differs from its paired manager profile.')
     ref = os.environ.get('KSU_REF', '')
     branch = os.environ.get('KSU_BRANCH', '')
     repository = os.environ.get('GITHUB_REPOSITORY', '')
@@ -315,7 +320,7 @@ def sign_manager(unsigned: Path, output: Path | None = None, *, output_dir: Path
             selection = manager_selection(embedded_identity['ksu_variant'], embedded_identity['ksu_branch'],
                                           embedded_identity['ksu_ref'], embedded_identity['manager_cert_size'],
                                           embedded_identity['manager_cert_sha256'], manager_recipe_sha256,
-                                          source_identity)
+                                          source_identity, package=embedded_identity['package'])
             embedded_identity['manager_recipe_sha256'] = manager_recipe_sha256
             embedded_identity['manager_source_identity'] = selection['manager_source_identity']
             embedded_identity['manager_native_proof'] = native_proof(module_report, boot_report, embedded_identity)

@@ -16,7 +16,7 @@ import zipfile
 from embedded_build_metadata import (KERNEL_MEMBER, metadata_json, read_manager_apk,
                                      read_member, official_receipt_from_environment)
 from kernel_order import natural_key
-from manager_variants import valid_manager_apk_filename
+from manager_variants import manager_display_name, valid_manager_apk_filename
 from prepare_release import prepare as prepare_gki, digest, regular, release_title
 from release_notes import asset_names
 from resolve_manager_selection import active_managers, validate_receipt
@@ -270,8 +270,9 @@ def prepare(source: Path, output: Path, *, selection: str, platform: str, operat
             label = 'Android' if platform == 'gki' else 'OnePlus'
             title = combined_release_title([manager for _, manager, _, _ in records], platform=label)
             sections = ['# ' + label + ' 联合构建结果', '']
-            for variant, _, notes, _ in records:
-                sections += ['## ' + variant, '', '\n'.join('##' + line if line.startswith('#') else line
+            for variant, manager, notes, _ in records:
+                label = manager_display_name(variant, manager['package'])
+                sections += ['## ' + label, '', '\n'.join('##' + line if line.startswith('#') else line
                             for line in notes.splitlines()), '']
             (ready / 'release.md').write_text('\n'.join(sections), encoding='utf-8', newline='\n')
             (ready / 'title.txt').write_text(title, encoding='utf-8', newline='\n')

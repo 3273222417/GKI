@@ -14,7 +14,7 @@ import zipfile
 import zlib
 
 from embedded_build_metadata import MAX_APK_BYTES, metadata_json
-from manager_variants import MANAGERS, valid_manager_apk_filename
+from manager_variants import MANAGERS, manager_source_package, valid_manager_apk_filename
 from prebuilt_manager_history import run_artifacts, successful_runs, verified_artifact
 from prepare_manager_lkm import native_version_code
 from reusable_manager_apk import CHANNELS, compact, manager_selection, recipe_hash, stage, workflow_consumer
@@ -48,7 +48,8 @@ def restore(reader, *, cache: Path, output: Path, consumer: dict, selection: dic
     for run in successful_runs(reader, consumer['repository'], branch, current_run=consumer['run_id']):
         for item in run_artifacts(reader, run):
             name = item['name']
-            if not valid_manager_apk_filename(name, selection['ksu_variant']) or not version_suffix.search(name):
+            if (not valid_manager_apk_filename(name, selection['ksu_variant'], package=selection['package'])
+                    or not version_suffix.search(name)):
                 continue
             if downloads >= MAX_DOWNLOADS:
                 return {}
@@ -84,7 +85,8 @@ def main(argv=None) -> int:
         recipe = recipe_hash(Path('.'))
         identity = metadata_json(args.source_identity.encode('utf-8'))
         selection = manager_selection(args.variant, args.channel, args.ksu_ref, args.cert_size,
-                                      args.cert_sha256, recipe, identity)
+                                      args.cert_sha256, recipe, identity,
+                                      package=manager_source_package(args.variant, args.source_dir))
         consumer = workflow_consumer()
         try:
             version = native_version_code(args.source_dir, identity['git_count'], variant=args.variant)

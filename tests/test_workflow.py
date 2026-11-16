@@ -468,7 +468,8 @@ class WorkflowTests(unittest.TestCase):
         build = next(step for step in manager['steps'] if step['name'] == '编译管理器与同版本 ksud')
         self.assertEqual(build['env']['KSU_PACKAGE_NAME'], build['env']['ORG_GRADLE_PROJECT_KSU_PACKAGE_NAME'])
         self.assertEqual(build['env']['KSU_PACKAGE_NAME'], '${{ needs.prepare-matrix.outputs.manager_package }}')
-        self.assertEqual(build['env']['ORG_GRADLE_PROJECT_KSU_NAME'], '${{ inputs.kernelsu_variant }}')
+        self.assertEqual(build['env']['ORG_GRADLE_PROJECT_KSU_NAME'],
+                         "${{ inputs.kernelsu_variant != 'SukiSU' && inputs.kernelsu_variant || '' }}")
         self.assertIn('BakaSU) script=tools/build_bakasu_manager.sh', build['run'])
         self.assertIn('SukiSU) script=tools/build_sukisu_manager.sh', build['run'])
         self.assertNotIn('secrets.', str(build))
@@ -611,13 +612,17 @@ class WorkflowTests(unittest.TestCase):
     def test_selected_source_is_frozen_and_checked_before_any_kernel_sync(self):
         prepare = self.workflow['jobs']['prepare-matrix']['steps']
         checkout = next(step for step in prepare if step.get('with', {}).get('path') == 'ksu-snapshot-source')
-        self.assertEqual(checkout['with']['repository'], '${{ steps.sources.outputs.ksu_repo }}')
+        self.assertIn("== 'SukiSU' && 'SukiSU-Nova/SukiSU-Nova'", checkout['with']['repository'])
+        self.assertIn('|| steps.sources.outputs.ksu_repo', checkout['with']['repository'])
         self.assertEqual(checkout['with']['ref'], '${{ steps.sources.outputs.ksu_ref }}')
         self.assertEqual(checkout['with']['fetch-depth'], 0)
         self.assertIs(checkout['with']['persist-credentials'], False)
         check = next(step for step in prepare if step['name'] == '展开矩阵前验证并固定源码快照')
+        certificate = next(step for step in prepare if step.get('id') == 'certificate')
         publish = next(step for step in prepare if step['name'] == '保存本次不可变源码缓存')
         self.assertIn('snapshot_ksu_source.py', check['run'])
+        self.assertIn('--source "$GITHUB_WORKSPACE/ksu-snapshot-source"', certificate['run'])
+        self.assertLess(prepare.index(checkout), prepare.index(certificate))
         self.assertLess(prepare.index(checkout), prepare.index(check))
         self.assertLess(prepare.index(check), prepare.index(publish))
         self.assertEqual(publish['uses'], 'actions/cache/save@v5')

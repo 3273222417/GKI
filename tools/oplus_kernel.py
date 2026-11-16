@@ -15,7 +15,7 @@ import time
 from checkout_ksu_snapshot import checkout_snapshot
 import checked_kernel_patch
 from integrate_sukisu import integrate
-from manager_variants import manager_profile
+from manager_variants import manager_profile, manager_source_package
 from oplus_recipe import bool_value, check_kernel, git as source_git, native_inputs, strict_json, validate_profile
 from pin_build_dependencies import SUSFS_24
 from set_manager_signature import configure
@@ -176,19 +176,20 @@ def finalize_config(workspace: Path, profile: dict, inputs: dict, reference: str
                     variant: str, patches: Path | None = None):
     profile = validate_profile(profile)
     native_inputs(inputs, profile)
-    identity = manager_selection(inputs, reference, variant)
+    manager_selection(inputs, reference, variant)
     root = checked_root(workspace, profile)
     verify_manager_checkout(root, reference)
-    if os.environ.get('MANAGER_PACKAGE') != identity['package']:
+    package = manager_source_package(variant, root / 'KernelSU')
+    if os.environ.get('MANAGER_PACKAGE') != package:
         raise ValueError('The verified APK must use the selected official application ID')
     from manager_variants import ADDITIONAL_MANAGERS
     from additional_manager_integration import effective_susfs, configure as configure_official
     if variant in ADDITIONAL_MANAGERS:
         configure_official(root, os.environ['MANAGER_CERT_SIZE'], os.environ['MANAGER_CERT_SHA256'],
-                           identity['package'], os.environ['MANAGER_VERSION_CODE'], variant=variant)
+                           package, os.environ['MANAGER_VERSION_CODE'], variant=variant)
     else:
         configure(root, os.environ['MANAGER_CERT_SIZE'], os.environ['MANAGER_CERT_SHA256'],
-                  identity['package'], os.environ['MANAGER_VERSION_CODE'])
+                  package, os.environ['MANAGER_VERSION_CODE'])
     command([sys.executable, ROOT / '.github/scripts/ensure-ksu-compat.py', root])
     defconfig = root / 'common/arch/arm64/configs/gki_defconfig'
     enable_kpm = bool_value(inputs['use_kpm'])
