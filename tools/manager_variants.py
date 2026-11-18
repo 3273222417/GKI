@@ -22,7 +22,8 @@ MANAGER_SELECTIONS = tuple(PUBLIC_SELECTIONS.values())
 SUKISU_ULTRA_PACKAGE = 'com.sukisu.ultra'
 SUKISU_NOVA_PACKAGE = 'com.sukisu.nova'
 _SUKISU_FILENAMES = {SUKISU_ULTRA_PACKAGE: 'SukiSU', SUKISU_NOVA_PACKAGE: 'SukiSU_Nova'}
-_SUKISU_KBUILD_NAMES = {SUKISU_ULTRA_PACKAGE: 'SukiSU-Ultra', SUKISU_NOVA_PACKAGE: 'SukiSU-Nova'}
+_SUKISU_KBUILD_NAMES = {SUKISU_ULTRA_PACKAGE: ('SukiSU-Ultra',),
+                        SUKISU_NOVA_PACKAGE: ('SukiSU-Nova', 'SukiSU')}
 # Actual Gradle application IDs, not Kotlin namespaces. BakaSU retains its
 # upstream ReSukiSU ID; its current Kotlin namespace is org.bakasu.bakasu.
 _PROFILES = {
@@ -93,7 +94,7 @@ def manager_source_package(variant: str, source: Path) -> str:
     if kbuild.is_symlink() or not kbuild.is_file() or not 0 < kbuild.stat().st_size <= 1024 * 1024:
         raise ValueError('SukiSU manager kernel source is missing or unsafe')
     names = re.findall(r'^REPO_NAME[ \t]*:=[ \t]*([A-Za-z0-9-]+)[ \t]*$', kbuild.read_text(encoding='utf-8'), re.M)
-    if names != [_SUKISU_KBUILD_NAMES[package]]:
+    if len(names) != 1 or names[0] not in _SUKISU_KBUILD_NAMES[package]:
         raise ValueError('SukiSU Gradle package and kernel project identity disagree')
     return package
 

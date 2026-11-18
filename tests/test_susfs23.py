@@ -460,6 +460,93 @@ class Susfs23ApplicationTests(unittest.TestCase):
             susfs.verify_native_avc(self.repository)
 
 
+class NativeNovaSelinuxTests(unittest.TestCase):
+    NATIVE = '''#include "hook/lsm_hook.h"
+#include "infra/symbol_resolver.h"
+static int (*inode_doinit_with_dentry_fn)(struct inode *, struct dentry *);
+static int native_inode_label(struct inode *inode, struct dentry *dentry)
+{
+    return inode_doinit_with_dentry_fn(inode, dentry);
+}
+DEFINE_STATIC_KEY_FALSE(fake_status_initialize_key);
+void register_hook(void) { ksu_lsm_hook(&selinux_inode_setxattr_hook); }
+void remove_hook(void) { ksu_lsm_unhook(&selinux_inode_setxattr_hook); }
+void late_hook(void) { ksu_lsm_hook(&selinux_inode_setxattr_hook); }
+'''
+    CORE = 'void init(void) { ksu_lsm_hook_init(); }\nvoid exit(void) { ksu_lsm_hook_exit(); }\n'
+
+    def setUp(self):
+        import tempfile
+        temporary = tempfile.TemporaryDirectory(dir=ROOT / 'tests')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.gradle = self.root / 'manager/app/build.gradle.kts'
+        self.gradle.parent.mkdir(parents=True)
+        self.feature = self.root / 'kernel/feature/selinux_hide.c'
+        self.feature.parent.mkdir(parents=True)
+        self.feature.write_text(self.NATIVE, encoding='utf-8')
+        self.provider_changed = False
+        self.identity('com.sukisu.nova', 'SukiSU')
+        mocking = mock.patch.object(susfs, 'git', side_effect=self.git)
+        mocking.start()
+        self.addCleanup(mocking.stop)
+
+    def identity(self, package, name):
+        self.gradle.write_text(
+            f'val defaultManagerPackageName = if (isPrBuild) "{package}.pr" else "{package}"\n'
+            'val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName\n'
+            f'namespace = "{package}"\napplicationId = managerPackageName\n', encoding='utf-8')
+        self.kbuild = 'REPO_NAME := ' + name + '\n'
+        (self.root / 'kernel/Kbuild').write_text(self.kbuild, encoding='utf-8')
+
+    def git(self, repository, *arguments):
+        self.assertEqual(self.root, repository)
+        if arguments == ('show', 'HEAD:kernel/Kbuild'):
+            code, output = 0, self.kbuild
+        elif arguments == ('show', 'HEAD:kernel/feature/selinux_hide.c'):
+            code, output = 0, self.NATIVE
+        elif arguments == ('diff', '--quiet', 'HEAD', '--', 'kernel/hook/lsm_hook.c', 'kernel/hook/lsm_hook.h'):
+            code, output = int(self.provider_changed), ''
+        else:
+            raise AssertionError(arguments)
+        return subprocess.CompletedProcess(['git', *arguments], code, stdout=output, stderr='')
+
+    def test_both_official_nova_names_retain_native_selinux_and_lifecycle(self):
+        for name in ('SukiSU-Nova', 'SukiSU'):
+            with self.subTest(name=name):
+                self.identity('com.sukisu.nova', name)
+                self.assertTrue(susfs.verify_native_nova_selinux(self.root, self.CORE))
+
+    def test_ultra_or_an_unrecognized_package_cannot_inherit_nova_selinux(self):
+        self.identity('com.sukisu.ultra', 'SukiSU-Ultra')
+        self.assertFalse(susfs.verify_native_nova_selinux(self.root, self.CORE))
+        for package in ('com.sukisu.ultra', 'com.example.manager'):
+            with self.subTest(package=package):
+                self.identity(package, 'SukiSU')
+                with self.assertRaises(ValueError):
+                    susfs.verify_native_nova_selinux(self.root, self.CORE)
+
+    def test_new_nova_project_name_keeps_all_existing_selinux_guards(self):
+        for before, after, error in (
+                ('#include "hook/lsm_hook.h"', '', 'declarations'),
+                ('#include "infra/symbol_resolver.h"', '', 'declarations'),
+                ('return inode_doinit_with_dentry_fn(inode, dentry);', 'return 0;', 'authorization and audit'),
+                ('ksu_lsm_unhook(&selinux_inode_setxattr_hook);', '', 'native lifecycle')):
+            with self.subTest(before=before):
+                self.feature.write_text(self.NATIVE.replace(before, after), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, error):
+                    susfs.verify_native_nova_selinux(self.root, self.CORE)
+        self.feature.write_text(self.NATIVE, encoding='utf-8')
+        for core in (self.CORE.replace('ksu_lsm_hook_init();', ''),
+                     self.CORE.replace('ksu_lsm_hook_exit();', '/* ksu_lsm_hook_exit(); */'),
+                     self.CORE + 'void extra(void) { ksu_lsm_hook_init(); }'):
+            with self.subTest(core=core), self.assertRaisesRegex(ValueError, 'native lifecycle'):
+                susfs.verify_native_nova_selinux(self.root, core)
+        self.provider_changed = True
+        with self.assertRaisesRegex(ValueError, 'native SELinux hook provider'):
+            susfs.verify_native_nova_selinux(self.root, self.CORE)
+
+
 class SelinuxInodeLifecycleTests(unittest.TestCase):
     CORE = '''int kernelsu_init(void) {
     int ret;

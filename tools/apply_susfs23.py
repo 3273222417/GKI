@@ -24,6 +24,7 @@ import sys
 
 from validate_susfs_hooks import HOOKS, inspect_c_source, strip_comments_and_literals
 from pin_build_dependencies import CompatibilityError, load_profile, reviewed_tree_pairs, source_policy
+from manager_variants import SUKISU_NOVA_PACKAGE, manager_source_package
 
 
 PROFILE_ROOT = Path(__file__).resolve().parents[1]
@@ -145,8 +146,11 @@ def verify_patch_memory_build(kbuild: str, *, nova_selinux: bool = False) -> Non
 def verify_native_nova_selinux(repository: Path, core: str) -> bool:
     """Keep Nova's native inode label operation alongside the SUSFS direct hooks."""
     kbuild = git(repository, 'show', 'HEAD:kernel/Kbuild')
-    if kbuild.returncode or not re.search(r'(?m)^REPO_NAME[ \t]*:=[ \t]*SukiSU-Nova[ \t]*$', kbuild.stdout):
+    names = re.findall(r'(?m)^REPO_NAME[ \t]*:=[ \t]*([A-Za-z0-9-]+)[ \t]*$', kbuild.stdout)
+    if kbuild.returncode or names not in (['SukiSU-Nova'], ['SukiSU']):
         return False
+    if manager_source_package('SukiSU', repository) != SUKISU_NOVA_PACKAGE:
+        raise ValueError('Nova SELinux hooks require the native Nova application ID')
     relative = 'kernel/feature/selinux_hide.c'
     original = git(repository, 'show', 'HEAD:' + relative)
     if original.returncode or git(repository, 'diff', '--quiet', 'HEAD', '--',

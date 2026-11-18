@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -54,6 +55,58 @@ class ManagerSelectionTests(unittest.TestCase):
         for manager in variants.MANAGERS:
             with mock.patch.dict(os.environ, {'KSU_VARIANT': manager}):
                 self.assertEqual(manager, variants.selected_variant())
+
+
+class NativeSukisuIdentityTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent)
+        self.addCleanup(temporary.cleanup)
+        self.source = Path(temporary.name)
+        self.gradle = self.source / 'manager/app/build.gradle.kts'
+        self.gradle.parent.mkdir(parents=True)
+        self.kbuild = self.source / 'kernel/Kbuild'
+        self.kbuild.parent.mkdir()
+
+    def source_identity(self, package, name):
+        self.gradle.write_text(
+            f'val defaultManagerPackageName = if (isPrBuild) "{package}.pr" else "{package}"\n'
+            'val managerPackageName = project.findProperty("KSU_PACKAGE_NAME")?.toString() ?: defaultManagerPackageName\n'
+            f'namespace = "{package}"\napplicationId = managerPackageName\n', encoding='utf-8')
+        self.kbuild.write_text('REPO_NAME := ' + name + '\n', encoding='utf-8')
+
+    def test_nova_native_package_accepts_both_official_project_names(self):
+        for name in ('SukiSU-Nova', 'SukiSU'):
+            with self.subTest(name=name):
+                self.source_identity(variants.SUKISU_NOVA_PACKAGE, name)
+                self.assertEqual(variants.SUKISU_NOVA_PACKAGE,
+                                 variants.manager_source_package('SukiSU', self.source))
+
+    def test_ultra_identity_remains_separate_from_both_nova_names(self):
+        self.source_identity(variants.SUKISU_ULTRA_PACKAGE, 'SukiSU-Ultra')
+        self.assertEqual(variants.SUKISU_ULTRA_PACKAGE,
+                         variants.manager_source_package('SukiSU', self.source))
+        for package, name in ((variants.SUKISU_ULTRA_PACKAGE, 'SukiSU'),
+                              (variants.SUKISU_ULTRA_PACKAGE, 'SukiSU-Nova'),
+                              (variants.SUKISU_NOVA_PACKAGE, 'SukiSU-Ultra'),
+                              (variants.SUKISU_NOVA_PACKAGE, 'Unreviewed-SukiSU')):
+            with self.subTest(package=package, name=name):
+                self.source_identity(package, name)
+                with self.assertRaisesRegex(ValueError, 'identity disagree'):
+                    variants.manager_source_package('SukiSU', self.source)
+
+    def test_new_project_name_cannot_bypass_package_namespace_or_duplicate_name_checks(self):
+        self.source_identity('com.example.manager', 'SukiSU')
+        with self.assertRaisesRegex(ValueError, 'Application ID'):
+            variants.manager_source_package('SukiSU', self.source)
+        self.source_identity(variants.SUKISU_NOVA_PACKAGE, 'SukiSU')
+        self.gradle.write_text(self.gradle.read_text().replace('namespace = "com.sukisu.nova"',
+                                                              'namespace = "com.sukisu.ultra"'), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'package declarations'):
+            variants.manager_source_package('SukiSU', self.source)
+        self.source_identity(variants.SUKISU_NOVA_PACKAGE, 'SukiSU')
+        self.kbuild.write_text(self.kbuild.read_text() + 'REPO_NAME := SukiSU-Nova\n', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'identity disagree'):
+            variants.manager_source_package('SukiSU', self.source)
 
 
 if __name__ == '__main__':
