@@ -339,7 +339,13 @@ def _check_run(reader, expected: Expected):
 
 
 def producer_name_matches(name, expected) -> bool:
-    return name in (expected.manager_job, expected.variant + ' / ' + expected.manager_job)
+    names = {expected.manager_job, expected.variant + ' / ' + expected.manager_job}
+    if expected.variant == 'SukiSU':
+        # Newly rendered workflow names use Nova; old signed producers retain
+        # their original job name. All other run/attempt/source checks still apply.
+        title = expected.manager_job.replace('SukiSU ', 'SukiSU-Nova ')
+        names.update((title, 'SukiSU / ' + title, 'SukiSU-Nova / ' + title))
+    return name in names
 
 
 def _validate_producer(job, expected: Expected | ProducerContext, *, job_id: int | None = None,

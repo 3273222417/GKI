@@ -74,6 +74,15 @@ class ManagerIdentityTests(unittest.TestCase):
                                           'SukiSU_v4.2.0_40922-release.apk')
         self.metadata = manager_metadata(apk_sha256='d' * 64)
 
+    def test_nova_renamed_producer_and_legacy_producer_are_both_identifiable(self):
+        for name in ('编译配套 SukiSU 管理器 APK', 'SukiSU / 编译配套 SukiSU 管理器 APK',
+                     '编译配套 SukiSU-Nova 管理器 APK',
+                     'SukiSU-Nova / 编译配套 SukiSU-Nova 管理器 APK'):
+            with self.subTest(name=name):
+                self.assertTrue(identity.producer_name_matches(name, self.expected))
+        for name in ('编译配套 BakaSU 管理器 APK', 'SukiSU-Nova / 编译配套 BakaSU 管理器 APK'):
+            self.assertFalse(identity.producer_name_matches(name, self.expected))
+
     def zip(self, metadata=None, *, member='assets/gki-build.json', extra=False):
         public = dict(self.metadata if metadata is None else metadata)
         public.pop('apk_sha256', None)
