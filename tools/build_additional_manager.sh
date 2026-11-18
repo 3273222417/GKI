@@ -126,7 +126,7 @@ if len(apks) != 1:
 apk = apks[0]
 if os.environ['KSU_VARIANT'] in ('KernelSU', 'KowSU'):
     from repack_manager_release import repack_release
-    repack_release(source, apk)
+    apk = repack_release(source, apk, os.environ['KSU_VARIANT'])
 verify_apk(source, apk)
 # Next and official managers assign an output filename ending in -release.apk
 # even when Gradle signing is disabled. Do not infer signing state from a name.

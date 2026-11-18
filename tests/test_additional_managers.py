@@ -1,4 +1,5 @@
 import copy
+import contextlib
 import hashlib
 import io
 import json
@@ -24,6 +25,56 @@ from additional_manager_integration import effective_susfs
 from combined_manager_workflow import add_combined
 from generate_workflow import create_workflow, load_yaml
 from oplus_workflow import create_workflow as oplus_workflow
+
+
+class AdditionalManagerArtifactTests(unittest.TestCase):
+    def test_complete_official_abi_output_keeps_its_source_filename_and_real_metadata(self):
+        from manager_lkm_jobs import KMIS
+        script = (ROOT / 'tools/build_additional_manager.sh').read_text(encoding='utf-8')
+        marker = 'python3 - "$manager_dir/app/build/outputs/apk/release" "$output_dir" "$build_tools" <<\'PY\'\n'
+        inspect = script.split(marker, 1)[1].split('\nPY\n', 1)[0]
+        for variant in ('KernelSU', 'KowSU', 'KernelSU-Next'):
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory)
+                release = source / 'manager/app/build/outputs/apk/release'
+                output = source / 'output'
+                release.mkdir(parents=True)
+                output.mkdir()
+                sdk = source / 'sdk'
+                aapt = sdk / 'build-tools/37.0.0/aapt2'
+                aapt.parent.mkdir(parents=True)
+                aapt.write_bytes(b'')
+                profile = manager_profile(variant)
+                apk = release / (profile['apk_prefixes'][0] + '_v3.4.2_32860-release.apk')
+                abis = ('arm64-v8a', 'x86_64', 'riscv64')
+                header = bytearray(b'\x7fELF\x02\x01\x01' + b'\0' * 57)
+                struct.pack_into('<H', header, 18, 183)
+                with zipfile.ZipFile(apk, 'w') as archive:
+                    archive.writestr('AndroidManifest.xml', b'manifest')
+                    archive.writestr('classes.dex', b'code')
+                    for abi in abis:
+                        archive.writestr('lib/' + abi + '/libkernelsu.so', b'jni fixture')
+                        archive.writestr('lib/' + abi + '/libksud.so', header + b'\0'.join(
+                            (kmi + '_kernelsu.ko').encode('ascii') for kmi in KMIS))
+                badging = ("package: name='" + profile['package']
+                           + "' versionCode='32860' versionName='v3.4.2'\n")
+                result = subprocess.CompletedProcess(['aapt2'], 0, stdout=badging, stderr='')
+                with patch.dict(os.environ, {'ANDROID_HOME': str(sdk), 'KSU_VARIANT': variant}), \
+                        patch.object(sys, 'argv', ['-', str(release), str(output), str(ROOT / 'tools')]), \
+                        patch('manager_full_native.official_abis', return_value=abis), \
+                        patch('manager_full_native.verify_apk'), \
+                        patch('repack_manager_release.repack_release', side_effect=lambda source, apk, variant: apk) as repack, \
+                        patch.object(subprocess, 'run', return_value=result), contextlib.redirect_stdout(io.StringIO()):
+                    exec(compile(inspect, 'build_additional_manager.sh:artifact-check', 'exec'), {})
+                if variant in ('KernelSU', 'KowSU'):
+                    repack.assert_called_once_with(source, apk, variant)
+                else:
+                    repack.assert_not_called()
+                metadata = json.loads((output / 'manager-build-metadata.json').read_text(encoding='utf-8'))
+                self.assertEqual({'source_apk_filename': apk.name, 'apk_filename': apk.name,
+                                  'manager_package': profile['package'], 'manager_version_name': 'v3.4.2',
+                                  'manager_version_code': 32860}, metadata)
+                self.assertEqual(apk.read_bytes(), (output / 'manager-unsigned.apk').read_bytes())
 
 
 def manifest(package='me.weishu.kernelsu', code=32715, version='v3.3.1', *, utf8=True):

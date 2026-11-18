@@ -183,12 +183,12 @@ class BakasuManagerArtifactTests(unittest.TestCase):
             for name, value in (self.contents if contents is None else contents).items():
                 archive.writestr(name, value)
 
-    def inspect_apk(self, badging=None):
+    def inspect_apk(self, badging=None, *, published_apk=None):
         result = subprocess.CompletedProcess(['aapt2'], 0, stdout=self.badging if badging is None else badging, stderr='')
         with patch.dict(os.environ, {'ANDROID_HOME': str(self.sdk)}), \
                 patch.object(sys, 'argv', ['-', str(self.release), str(self.output), str(ROOT / 'tools')]), \
                 patch('manager_full_native.official_abis', return_value=('arm64-v8a',)), \
-                patch('repack_manager_release.repack_release'), \
+                patch('repack_manager_release.repack_release', side_effect=lambda source, apk, variant: published_apk or apk), \
                 patch('manager_full_native.verify_apk'), \
                 patch.object(subprocess, 'run', return_value=result), contextlib.redirect_stdout(io.StringIO()):
             exec(compile(self.inspect, 'build_bakasu_manager.sh:artifact-check', 'exec'), {})
@@ -201,6 +201,17 @@ class BakasuManagerArtifactTests(unittest.TestCase):
                           'manager_package': 'com.resukisu.resukisu',
                           'manager_version_name': 'v4.2.0-rc3', 'manager_version_code': 35252}, actual)
         self.assertEqual(self.apath.read_bytes(), (self.output / 'manager-unsigned.apk').read_bytes())
+
+    def test_arm64_publication_replaces_the_universal_filename_in_exported_metadata(self):
+        published = self.apath.with_name(self.apath.name.replace('-universal-', '-arm64-v8a-'))
+        shutil.copyfile(self.apath, published)
+        with patch.object(Path, 'rglob', return_value=iter([self.apath])):
+            self.inspect_apk(published_apk=published)
+        metadata = json.loads((self.output / 'manager-build-metadata.json').read_text(encoding='utf-8'))
+        self.assertEqual(published.name, metadata['source_apk_filename'])
+        self.assertEqual(published.name.removesuffix('-unsigned.apk') + '.apk', metadata['apk_filename'])
+        self.assertNotIn('universal', metadata['apk_filename'])
+        self.assertEqual(published.read_bytes(), (self.output / 'manager-unsigned.apk').read_bytes())
 
     def test_native_apk_in_a_release_output_subdirectory_is_found(self):
         nested = self.release / 'universal'

@@ -1,4 +1,4 @@
-"""Preserve the selected official APK's ABI set and native asset inventory."""
+"""Validate official release architectures and preserve the native asset inventory."""
 from __future__ import annotations
 
 import argparse
@@ -34,6 +34,12 @@ def official_abis(source: Path) -> tuple[str, ...]:
     if 'arm64-v8a' not in values or not values <= ABIS.keys():
         raise ValueError('Official APK ABI set is missing or has a newly unsupported architecture')
     return tuple(abi for abi in ABIS if abi in values)
+
+
+def publication_abis(source: Path, variant: str) -> tuple[str, ...]:
+    """Use official ARM64 splits for the phone managers that publish per ABI."""
+    declared = official_abis(source)
+    return ('arm64-v8a',) if selected_variant(variant) in ('SukiSU', 'BakaSU') else declared
 
 
 def has_guard(source: Path) -> bool:
@@ -174,8 +180,12 @@ def stage_extras(source: Path, artifacts: Path, identity_path: Path, reference: 
     return receipts
 
 
-def verify_apk(source: Path, apk: Path) -> dict:
-    expected = official_abis(source)
+def verify_apk(source: Path, apk: Path, *, expected_abis: tuple[str, ...] | None = None) -> dict:
+    declared = official_abis(source)
+    expected = declared if expected_abis is None else expected_abis
+    if (not expected or 'arm64-v8a' not in expected or len(expected) != len(set(expected))
+            or not set(expected) <= set(declared)):
+        raise ValueError('Published APK architectures must be declared by the selected official source')
     with zipfile.ZipFile(apk) as archive:
         if archive.testzip() is not None:
             raise ValueError('Full native APK is corrupt')

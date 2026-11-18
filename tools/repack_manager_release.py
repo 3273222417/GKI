@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
 import zipfile
 
-from manager_full_native import official_abis, verify_apk
+from manager_full_native import publication_abis, verify_apk
 
 
 def upstream_repacker(source: Path):
@@ -22,28 +23,46 @@ def upstream_repacker(source: Path):
     return module
 
 
-def verify_contents(before: Path, after: Path) -> None:
+def verify_contents(before: Path, after: Path, abis: tuple[str, ...]) -> None:
     """Upstream may strip native ELF files; all other release content stays intact."""
     with zipfile.ZipFile(before) as original, zipfile.ZipFile(after) as repacked:
-        if (set(original.namelist()) != set(repacked.namelist())
+        retained = {name for name in original.namelist()
+                    if not name.startswith('lib/') or name.count('/') < 2 or name.split('/')[1] in abis}
+        if (retained != set(repacked.namelist())
+                or len(original.namelist()) != len(set(original.namelist()))
                 or len(repacked.namelist()) != len(set(repacked.namelist()))
                 or repacked.testzip() is not None):
             raise ValueError('Official repack removed or added an APK entry')
-        for name in original.namelist():
+        for name in retained:
             if name.startswith('lib/') and name.endswith('.so'):
                 continue
             if original.read(name) != repacked.read(name):
                 raise ValueError('Official repack changed non-native APK content: ' + name)
 
 
-def repack_release(source: Path, apk: Path) -> None:
+def split_filename(apk: Path, abis: tuple[str, ...], variant: str) -> Path:
+    if variant not in ('SukiSU', 'BakaSU'):
+        return apk
+    if abis != ('arm64-v8a',):
+        raise ValueError('Expected the official ARM64 release split')
+    name, count = re.subn(r'(?:-universal|-arm64-v8a)?(-release(?:-unsigned)?\.apk)$',
+                          r'-arm64-v8a\1', apk.name)
+    if count != 1:
+        raise ValueError('Expected an official release APK filename for the ARM64 split')
+    return apk.with_name(name)
+
+
+def repack_release(source: Path, apk: Path, variant: str) -> Path:
     source = source.resolve(strict=True)
     apk = apk.resolve(strict=True)
     release = source / 'manager/app/build/outputs/apk/release'
     if not apk.is_relative_to(release) or apk.suffix != '.apk':
         raise ValueError('Expected the selected source release APK')
-    abis = official_abis(source)
+    abis = publication_abis(source, variant)
     verify_apk(source, apk)
+    target = split_filename(apk, abis, variant)
+    if target.is_symlink():
+        raise ValueError('Refusing a linked published APK destination')
     upstream = upstream_repacker(source)
     strip = upstream.find_strip_tool()
     if strip is None:
@@ -59,7 +78,8 @@ def repack_release(source: Path, apk: Path) -> None:
         # the existing workflow aligns and signs the result independently.
         upstream.repack_apk(apk, result, list(abis), daemons, strip)
         upstream.assert_required_libs(result, list(abis))
-        verify_contents(apk, result)
-        verify_apk(source, result)
-        shutil.copyfile(result, apk)
-    print(f'Official release repack: {before} -> {apk.stat().st_size} bytes; ABIs={",".join(abis)}', flush=True)
+        verify_contents(apk, result, abis)
+        verify_apk(source, result, expected_abis=abis)
+        shutil.copyfile(result, target)
+    print(f'Official release repack: {before} -> {target.stat().st_size} bytes; ABIs={",".join(abis)}', flush=True)
+    return target

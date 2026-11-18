@@ -151,7 +151,7 @@ import sys
 import zipfile
 sys.path.insert(0, sys.argv[3])
 from manager_lkm_jobs import KMIS
-from manager_full_native import official_abis, verify_apk
+from manager_full_native import official_abis, publication_abis, verify_apk
 release, output = map(Path, sys.argv[1:3])
 source = release.parents[5]
 expected_abis = set(official_abis(source))
@@ -165,8 +165,9 @@ if len(apks) != 1:
     raise SystemExit(f'Expected exactly one release APK, found {len(apks)}.')
 apk = apks[0]
 from repack_manager_release import repack_release
-repack_release(source, apk)
-verify_apk(source, apk)
+apk = repack_release(source, apk, 'SukiSU')
+expected_abis = set(publication_abis(source, 'SukiSU'))
+verify_apk(source, apk, expected_abis=tuple(expected_abis))
 if 'unsigned' not in apk.stem.lower():
     raise SystemExit('Expected the unsigned release APK; signing material must remain outside the source build.')
 if not apk.name.endswith('-unsigned.apk') or any(ord(char) < 32 or ord(char) > 126 for char in apk.name):

@@ -196,7 +196,7 @@ class ManagerBuildArtifactTests(unittest.TestCase):
         self.inspect = script.split(marker, 1)[1].split('\nPY\n', 1)[0]
         self.badging = "package: name='com.sukisu.ultra' versionCode='41030' versionName='v4.2.1'\n"
 
-    def inspect_artifact(self, badging=None, returncode=0, *, package='com.sukisu.ultra'):
+    def inspect_artifact(self, badging=None, returncode=0, *, package='com.sukisu.ultra', published_apk=None):
         result = subprocess.CompletedProcess(['aapt2'], returncode, stdout=badging or self.badging, stderr='')
         environment = {'ANDROID_HOME': str(self.sdk), 'GITHUB_OUTPUT': str(self.github_output),
                        'KSU_PACKAGE_NAME': package}
@@ -204,7 +204,7 @@ class ManagerBuildArtifactTests(unittest.TestCase):
                 ['-', str(self.release), str(self.output), str(ROOT / 'tools')]):
             with patch.object(subprocess, 'run', return_value=result) as run, \
                     patch('manager_full_native.official_abis', return_value=('arm64-v8a',)), \
-                    patch('repack_manager_release.repack_release'), \
+                    patch('repack_manager_release.repack_release', side_effect=lambda source, apk, variant: published_apk or apk), \
                     patch('manager_full_native.verify_apk'):
                 with contextlib.redirect_stdout(io.StringIO()):
                     exec(compile(self.inspect, 'build_sukisu_manager.sh:artifact-check', 'exec'), {})
@@ -224,6 +224,18 @@ class ManagerBuildArtifactTests(unittest.TestCase):
         self.assertIn('apk_filename=SukiSU_v4.2.1_41030-release.apk\n', outputs)
         self.assertIn('manager_version_name=v4.2.1\n', outputs)
         self.assertIn('manager_version_code=41030\n', outputs)
+
+    def test_arm64_publication_path_is_used_for_metadata_badging_and_export(self):
+        published = self.apk.with_name(self.apk.name.replace('-release-', '-arm64-v8a-release-'))
+        shutil.copyfile(self.apk, published)
+        # The scanner starts with the full output; the helper returns a new ARM64 path.
+        with patch.object(Path, 'glob', return_value=iter([self.apk])):
+            run = self.inspect_artifact(published_apk=published)
+        metadata = json.loads((self.output / 'manager-build-metadata.json').read_text(encoding='utf-8'))
+        self.assertEqual(published.name, metadata['source_apk_filename'])
+        self.assertEqual(published.name.removesuffix('-unsigned.apk') + '.apk', metadata['apk_filename'])
+        self.assertEqual(run.call_args.args[0][-1], str(published))
+        self.assertEqual(published.read_bytes(), (self.output / 'manager-unsigned.apk').read_bytes())
 
     def test_nova_artifact_keeps_the_official_package_filename_and_version(self):
         self.apk = self.apk.rename(self.release / 'SukiSU_Nova_v3.0.0_30000-release-unsigned.apk')

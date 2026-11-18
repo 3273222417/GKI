@@ -54,6 +54,18 @@ class FullNativeTests(unittest.TestCase):
         (self.source / 'manager/app/build.gradle.kts').write_text('abiFilters("arm64-v8a")')
         self.assertEqual(tuple(native.ABIS), native.official_abis(self.source))
 
+    def test_publication_uses_arm64_only_for_the_official_phone_manager_splits(self):
+        for variant in ('SukiSU', 'BakaSU'):
+            with self.subTest(variant=variant):
+                self.assertEqual(('arm64-v8a',), native.publication_abis(self.source, variant))
+        for variant in ('KernelSU', 'KernelSU-Next', 'KowSU', 'FinaSU'):
+            with self.subTest(variant=variant):
+                self.assertEqual(tuple(native.ABIS), native.publication_abis(self.source, variant))
+        # Publication must still validate the source declaration before selecting a split.
+        with mock.patch.object(native, 'official_abis', side_effect=ValueError('changed upstream ABI')):
+            with self.assertRaisesRegex(ValueError, 'changed upstream ABI'):
+                native.publication_abis(self.source, 'SukiSU')
+
     def test_all_extra_components_are_checked_before_embedding(self):
         self.extras()
         native.stage_extras(self.source, self.f.artifacts, self.f.identity_file, self.f.reference, (self.kmi,))
@@ -76,12 +88,12 @@ class FullNativeTests(unittest.TestCase):
             native.stage_extras(self.source, self.f.artifacts, self.f.identity_file, self.f.reference, (self.kmi,))
         self.assertFalse((self.source / 'userspace/ksud/bin/x86_64').exists())
 
-    def apk(self, missing=None):
+    def apk(self, missing=None, *, abis=None):
         # Small structural ELF fixtures; these are never exported as binaries.
         path = self.f.root / 'fixture.apk'
         with zipfile.ZipFile(path, 'w') as archive:
             for abi, (arch, _, machine) in native.ABIS.items():
-                if abi == missing:
+                if abi == missing or (abis is not None and abi not in abis):
                     continue
                 raw = bytearray(b'\x7fELF\x02\x01\x01' + b'\0' * 57)
                 if arch == 'arm':
@@ -96,6 +108,24 @@ class FullNativeTests(unittest.TestCase):
         self.assertEqual(list(native.ABIS), native.verify_apk(self.source, self.apk())['abis'])
         with self.assertRaisesRegex(ValueError, 'architecture'):
             native.verify_apk(self.source, self.apk(missing='riscv64'))
+
+    def test_explicit_arm64_split_is_verified_without_weakening_the_full_default(self):
+        apk = self.apk(abis=('arm64-v8a',))
+        with self.assertRaisesRegex(ValueError, 'architecture'):
+            native.verify_apk(self.source, apk)
+        verified = native.verify_apk(self.source, apk, expected_abis=('arm64-v8a',))
+        self.assertEqual(['arm64-v8a'], verified['abis'])
+        self.assertEqual(['arm64-v8a'], [row['abi'] for row in verified['native_components']])
+        with self.assertRaisesRegex(ValueError, 'architecture'):
+            native.verify_apk(self.source, self.apk(), expected_abis=('arm64-v8a',))
+
+    def test_published_abi_selection_requires_a_nonempty_declared_unique_arm64_set(self):
+        for abis in ((), ('x86_64',), ('arm64-v8a', 'arm64-v8a'), ('arm64-v8a', 'mips64')):
+            with self.subTest(abis=abis), self.assertRaisesRegex(ValueError, 'declared'):
+                native.verify_apk(self.source, self.apk(), expected_abis=abis)
+        with mock.patch.object(native, 'official_abis', return_value=('arm64-v8a',)):
+            with self.assertRaisesRegex(ValueError, 'declared'):
+                native.verify_apk(self.source, self.apk(), expected_abis=('arm64-v8a', 'riscv64'))
 
     def test_replacing_official_busybox_is_rejected(self):
         (self.source / 'userspace/ksud/bin/aarch64/busybox').write_bytes(b'trimmed')
