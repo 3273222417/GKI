@@ -28,6 +28,7 @@ def extend_gki(workflow: dict) -> dict:
     fields['kernelsu_variant']['default'] = 'SukiSU-Nova'
     job = workflow['jobs']['build-kernel']
     job['env']['GKI_MANAGER_METADATA'] = RECEIPT
+    job['env']['KSU_PACKAGE_NAME'] = '${{ needs.prepare-matrix.outputs.manager_package }}'
     source_steps = {'恢复本次不可变源码缓存', '恢复本次不可变源码备份', '核实共享源码缓存',
                     '检出内核配套的管理器快照', '编译前读取本次 APK 的实际签名信息',
                     '从官方固定提交恢复并核实源码', '核对固定源码与准备任务的完整身份'}
@@ -78,16 +79,18 @@ def extend_gki(workflow: dict) -> dict:
         if field in dispatch_fields:
             capture['env']['GKI_REQUEST_' + field.upper()] = '${{ inputs.' + field + ' }}'
     capture['run'] = ('if [ "${GKI_COMBINED_WORKER:-false}" = true ]; then\n'
-                      '  manager_name="${KSU_VARIANT/SukiSU/SukiSU-Nova}"\n'
-                      '  META_FILE="${META_FILE%-AnyKernel3.zip}-${manager_name}-AnyKernel3.zip"\n'
+                      '  META_FILE="${META_FILE%-AnyKernel3.zip}${GKI_MANAGER_SUFFIX}-AnyKernel3.zip"\n'
                       '  export META_FILE\n'
                       '  for image in ./*-boot*.img; do\n'
                       '    [ -f "$image" ] || continue\n'
                       '    base="${image%%-boot*}"; rest="${image#"$base"}"\n'
-                      '    mv -- "$image" "${base}-${manager_name}${rest}"\n'
+                      '    mv -- "$image" "${base}${GKI_MANAGER_SUFFIX}${rest}"\n'
                       '  done\nfi\n' + capture['run'])
     job['steps'].insert(0, {'name': '设置组合构建文件名', 'if': "env.GKI_COMBINED_WORKER == 'true'",
-                           'run': 'echo "GKI_MANAGER_SUFFIX=-${KSU_VARIANT/SukiSU/SukiSU-Nova}" >> "$GITHUB_ENV"'})
+                           'run': 'manager_name="$KSU_VARIANT"\n'
+                                  'if [ "$KSU_VARIANT" = SukiSU ] && [ "$KSU_PACKAGE_NAME" = com.sukisu.nova ]; then\n'
+                                  '  manager_name=SukiSU-Nova\nfi\n'
+                                  'echo "GKI_MANAGER_SUFFIX=-${manager_name}" >> "$GITHUB_ENV"'})
     workflow['jobs']['publish-release']['env']['GKI_MANAGER_METADATA'] = RECEIPT
     return effective_inputs(workflow)
 

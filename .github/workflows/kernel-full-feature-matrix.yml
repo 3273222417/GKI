@@ -2326,13 +2326,19 @@ jobs:
       CCACHE_MAXSIZE: 2G
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_MANAGER_METADATA: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_metadata', matrix.variant)] }}
+      KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
         'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
         }}
     steps: &id001
     - name: 设置组合构建文件名
       if: env.GKI_COMBINED_WORKER == 'true'
-      run: echo "GKI_MANAGER_SUFFIX=-${KSU_VARIANT/SukiSU/SukiSU-Nova}" >> "$GITHUB_ENV"
+      run: |-
+        manager_name="$KSU_VARIANT"
+        if [ "$KSU_VARIANT" = SukiSU ] && [ "$KSU_PACKAGE_NAME" = com.sukisu.nova ]; then
+          manager_name=SukiSU-Nova
+        fi
+        echo "GKI_MANAGER_SUFFIX=-${manager_name}" >> "$GITHUB_ENV"
     - name: 构建信息摘要
       shell: bash
       run: |
@@ -7965,13 +7971,12 @@ jobs:
         GKI_REQUEST_USE_NETWORKING: ${{ inputs.use_networking }}
       run: |
         if [ "${GKI_COMBINED_WORKER:-false}" = true ]; then
-          manager_name="${KSU_VARIANT/SukiSU/SukiSU-Nova}"
-          META_FILE="${META_FILE%-AnyKernel3.zip}-${manager_name}-AnyKernel3.zip"
+          META_FILE="${META_FILE%-AnyKernel3.zip}${GKI_MANAGER_SUFFIX}-AnyKernel3.zip"
           export META_FILE
           for image in ./*-boot*.img; do
             [ -f "$image" ] || continue
             base="${image%%-boot*}"; rest="${image#"$base"}"
-            mv -- "$image" "${base}-${manager_name}${rest}"
+            mv -- "$image" "${base}${GKI_MANAGER_SUFFIX}${rest}"
           done
         fi
         python3 tools/capture_build_metadata.py --kernel-root "$KERNEL_ROOT" \
@@ -8166,6 +8171,7 @@ jobs:
       CCACHE_MAXSIZE: 2G
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_MANAGER_METADATA: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_metadata', matrix.variant)] }}
+      KSU_PACKAGE_NAME: ${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
         'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
         }}

@@ -53,6 +53,7 @@ class FinaBuildBoundaryTests(unittest.TestCase):
                 'SUKISU_APK_PASSWORD': 'permanent-password', 'ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD': 'permanent-password'}
             with patch.dict(os.environ, environment), patch.object(builder, 'prepare'), \
                     patch.object(builder, 'official_abis', return_value=('arm64-v8a', 'x86_64', 'riscv64')), \
+                    patch.object(builder, 'payload_steps', return_value=['nomount', 'sui', 'apk']), \
                     patch.object(builder, 'generate_build_key', side_effect=generate), \
                     patch.object(builder.subprocess, 'Popen', FailedNativeBuild):
                 with self.assertRaisesRegex(ValueError, 'canonical native build'):
@@ -60,6 +61,16 @@ class FinaBuildBoundaryTests(unittest.TestCase):
             self.assertFalse(observed['key'].exists())
             self.assertFalse(observed['properties'].exists())
             self.assertFalse((root / 'output/manager-unsigned.apk').exists())
+
+    def test_new_official_engine_builds_before_native_daemon(self):
+        driver = 'build_folkzygisk() {\n}\n    folkzygisk) build_folkzygisk ;;\n'
+        with patch.object(builder, 'git', return_value=driver):
+            self.assertEqual(['nomount', 'sui', 'folkzygisk', 'apk'], builder.payload_steps(Path('.')))
+        with patch.object(builder, 'git', return_value='old driver without FolkZygisk'):
+            self.assertEqual(['nomount', 'sui', 'apk'], builder.payload_steps(Path('.')))
+        with patch.object(builder, 'git', return_value='build_folkzygisk() {\n}'):
+            with self.assertRaisesRegex(ValueError, 'entry point'):
+                builder.payload_steps(Path('.'))
 
 
 if __name__ == '__main__':

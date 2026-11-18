@@ -204,6 +204,7 @@ class ManagerBuildArtifactTests(unittest.TestCase):
                 ['-', str(self.release), str(self.output), str(ROOT / 'tools')]):
             with patch.object(subprocess, 'run', return_value=result) as run, \
                     patch('manager_full_native.official_abis', return_value=('arm64-v8a',)), \
+                    patch('repack_manager_release.repack_release'), \
                     patch('manager_full_native.verify_apk'):
                 with contextlib.redirect_stdout(io.StringIO()):
                     exec(compile(self.inspect, 'build_sukisu_manager.sh:artifact-check', 'exec'), {})

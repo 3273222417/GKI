@@ -128,7 +128,7 @@ class CombinedWorkflowTests(unittest.TestCase):
     def test_existing_menu_defaults_and_version_choices_are_retained(self):
         current = self.single['on']['workflow_dispatch']['inputs']
         self.assertEqual(['正式版', '最新版'], current['kernelsu_branch']['options'])
-        self.assertEqual('SukiSU', current['kernelsu_variant']['default'])
+        self.assertEqual('SukiSU-Nova', current['kernelsu_variant']['default'])
         self.assertEqual(tuple(MANAGERS), selected_managers('SukiSU') + tuple(MANAGERS[1:]))
         self.assertEqual(COMBINED_MANAGERS, selected_managers(COMBINED_SELECTION))
         for key in ('use_bbg', 'use_ddk', 'use_ntsync', 'use_networking'):

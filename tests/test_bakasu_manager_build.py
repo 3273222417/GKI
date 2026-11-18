@@ -188,6 +188,7 @@ class BakasuManagerArtifactTests(unittest.TestCase):
         with patch.dict(os.environ, {'ANDROID_HOME': str(self.sdk)}), \
                 patch.object(sys, 'argv', ['-', str(self.release), str(self.output), str(ROOT / 'tools')]), \
                 patch('manager_full_native.official_abis', return_value=('arm64-v8a',)), \
+                patch('repack_manager_release.repack_release'), \
                 patch('manager_full_native.verify_apk'), \
                 patch.object(subprocess, 'run', return_value=result), contextlib.redirect_stdout(io.StringIO()):
             exec(compile(self.inspect, 'build_bakasu_manager.sh:artifact-check', 'exec'), {})

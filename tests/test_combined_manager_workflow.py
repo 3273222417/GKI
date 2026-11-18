@@ -1,8 +1,12 @@
 """Keep selected managers behind one complete verification/publication gate."""
 import json
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +66,49 @@ class CombinedReleaseWorkflowTests(unittest.TestCase):
         for oplus, workflow in self.workflows:
             publisher_id = 'verify-oplus-assets' if oplus else 'publish-release'
             yield oplus, workflow, workflow['jobs'][publisher_id]
+
+    def test_gki_filename_package_uses_the_prepared_manager_of_each_matrix_row(self):
+        workflow = next(workflow for oplus, workflow in self.workflows if not oplus)
+        expected = "${{ needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}"
+        for job_id in ('build-kernel', 'build-kernel-overflow'):
+            with self.subTest(job=job_id):
+                self.assertEqual(expected, workflow['jobs'][job_id]['env']['KSU_PACKAGE_NAME'])
+
+    def test_combined_gki_archives_and_boot_images_follow_the_actual_manager_package(self):
+        shell = shutil.which('bash') or shutil.which('sh')
+        if not shell and (git := shutil.which('git')):
+            candidate = Path(git).parent.parent / 'usr/bin/sh.exe'
+            shell = str(candidate) if candidate.is_file() else None
+        if not shell:
+            self.skipTest('Bash is required to execute the combined filename steps')
+        workflow = next(workflow for oplus, workflow in self.workflows if not oplus)
+        steps = workflow['jobs']['build-kernel']['steps']
+        setup = next(step['run'] for step in steps if step.get('name') == '设置组合构建文件名')
+        capture = next(step['run'] for step in steps if step.get('name') == '记录内核实际配置')
+        rename = capture.partition('\nfi\n')[0] + '\nfi\n'
+        for variant, package, suffix in (
+                ('SukiSU', 'com.sukisu.nova', 'SukiSU-Nova'),
+                ('SukiSU', 'com.sukisu.ultra', 'SukiSU'),
+                ('BakaSU', 'com.bakasu.baka', 'BakaSU'),
+                ('KernelSU-Next', 'com.rifsxd.ksunext', 'KernelSU-Next')):
+            with self.subTest(variant=variant, package=package), tempfile.TemporaryDirectory(
+                    prefix='.manager-suffix-', dir=ROOT / 'tests') as temporary:
+                directory = Path(temporary)
+                for name in ('kernel-boot.img', 'kernel-boot-gz.img'):
+                    (directory / name).write_bytes(b'original image')
+                script = ('set -eu\n' + setup + '\n. ./manager.env\n' + rename
+                          + 'printf "%s\\n" "$META_FILE"\n')
+                result = subprocess.run([shell, '-c', script], cwd=directory,
+                    capture_output=True, text=True, encoding='utf-8', timeout=15,
+                    env={**os.environ, 'PATH': str(Path(shell).parent) + os.pathsep + os.environ.get('PATH', ''),
+                         'BASH_ENV': '', 'KSU_VARIANT': variant,
+                         'KSU_PACKAGE_NAME': package, 'GITHUB_ENV': 'manager.env',
+                         'GKI_COMBINED_WORKER': 'true', 'META_FILE': 'kernel-AnyKernel3.zip'})
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual('kernel-' + suffix + '-AnyKernel3.zip', result.stdout.strip())
+                for ending in ('-boot.img', '-boot-gz.img'):
+                    self.assertEqual(b'original image', (directory / ('kernel-' + suffix + ending)).read_bytes())
+                    self.assertFalse((directory / ('kernel' + ending)).exists())
 
     def test_every_needed_kernel_batch_must_succeed_before_any_artifact_verification(self):
         for oplus, _, publisher in self.publishers():

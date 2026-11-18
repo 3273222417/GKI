@@ -172,6 +172,8 @@ for candidate in sorted(release.rglob('*.apk')):
 if len(apks) != 1:
     raise SystemExit(f'Expected exactly one release APK, found {len(apks)}.')
 apk = apks[0]
+from repack_manager_release import repack_release
+repack_release(source, apk)
 verify_apk(source, apk)
 if 'unsigned' not in apk.stem.lower():
     raise SystemExit('Expected the unsigned release APK; signing material must remain outside the source build.')

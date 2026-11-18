@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shlex
 import shutil
@@ -19,8 +20,19 @@ from manager_variants import manager_profile, valid_manager_apk_filename
 from prepare_additional_gradle import prepare
 from sign_sukisu_manager import redact
 from manager_full_native import official_abis, verify_apk
+from snapshot_ksu_source import git
 
 BUILD_ALIAS = 'gki-fina-build-only'
+
+
+def payload_steps(source: Path) -> list[str]:
+    """Follow the selected official driver, including newly added engines."""
+    driver = git(source, 'show', 'HEAD:build.sh')
+    function = bool(re.search(r'^build_folkzygisk\(\)\s*\{', driver, re.M))
+    command = bool(re.search(r'^\s*folkzygisk\)\s*build_folkzygisk\s*;;', driver, re.M))
+    if function != command:
+        raise ValueError('Review the changed official FinaSU FolkZygisk build entry point')
+    return ['nomount', 'sui'] + (['folkzygisk'] if command else []) + ['apk']
 
 
 def generate_build_key(key: Path, password: str, environment: dict) -> None:
@@ -68,7 +80,7 @@ def build(source: Path, output: Path):
         # Paired, certificate-checked KernelSU LKMs are staged by the existing
         # eight-KMI job. Preserve them; build the remaining native dependencies.
         commands = [
-            ['bash', 'build.sh', 'nomount', 'sui', 'apk'],
+            ['bash', 'build.sh', *payload_steps(source)],
             ['bash', str(Path(__file__).with_name('build_manager_native.sh')), str(source)],
             ['bash', 'build.sh', 'repack'],
         ]

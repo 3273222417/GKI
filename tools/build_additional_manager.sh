@@ -124,6 +124,9 @@ for candidate in sorted(release.glob('*.apk')):
 if len(apks) != 1:
     raise SystemExit(f'Expected exactly one release APK, found {len(apks)}.')
 apk = apks[0]
+if os.environ['KSU_VARIANT'] in ('KernelSU', 'KowSU'):
+    from repack_manager_release import repack_release
+    repack_release(source, apk)
 verify_apk(source, apk)
 # Next and official managers assign an output filename ending in -release.apk
 # even when Gradle signing is disabled. Do not infer signing state from a name.
