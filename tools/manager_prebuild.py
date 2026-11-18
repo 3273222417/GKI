@@ -14,13 +14,14 @@ from manager_lkm_jobs import load_ddk_matrix
 from manager_variants import MANAGERS
 from prebuilt_manager_history import named_artifacts, verified_artifact
 from resolve_build_sources import SHA, SourceResolutionError, validate_ref
+from reusable_manager_apk import recipe_hash
 from wait_manager_identity import GitHubReader, IdentityError, positive_integer
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANNELS = {STABLE: '正式版', LATEST: '最新版'}
 MAX_STATE = 8192
-STATE_VERSION = 2
+STATE_VERSION = 3
 STATE_ARTIFACT = 'gki-manager-apk-observations.json'
 
 
@@ -35,15 +36,16 @@ def source(reference: str, branch: str) -> tuple[str, str]:
 
 
 def state_document(channels: ChannelSources) -> dict:
-    return {'schema_version': STATE_VERSION, 'channels': {
+    return {'schema_version': STATE_VERSION, 'recipe_sha256': recipe_hash(ROOT), 'channels': {
         variant: {tier: {'reference': ref, 'source_branch': branch} for tier, (ref, branch) in selected.items()}
         for variant, selected in channels.items()
     }}
 
 
 def validate_state(document: object) -> ChannelSources:
-    if (not isinstance(document, dict) or set(document) != {'schema_version', 'channels'}
+    if (not isinstance(document, dict) or set(document) != {'schema_version', 'recipe_sha256', 'channels'}
             or type(document['schema_version']) is not int or document['schema_version'] != STATE_VERSION
+            or document['recipe_sha256'] != recipe_hash(ROOT)
             or not isinstance(document['channels'], dict) or set(document['channels']) != set(MANAGERS)):
         raise ValueError('无效的管理器预编译记录')
     result = {}

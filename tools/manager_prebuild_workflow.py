@@ -6,7 +6,7 @@ from manager_prebuild import STATE_ARTIFACT
 
 OUTPUT = '.github/workflows/prebuild-manager-apks.yml'
 STATE_FILE = '${{ runner.temp }}/' + STATE_ARTIFACT
-STATE_PREFIX = 'gki-manager-apk-observations-v3-'
+STATE_PREFIX = 'gki-manager-apk-observations-v4-'
 STATE_KEY = STATE_PREFIX + '${{ github.run_id }}-${{ github.run_attempt }}'
 UPDATER_NAME = '检查并同步官方更新'
 UPDATER_PATH = '.github/workflows/check-upstream-updates.yml'

@@ -133,6 +133,17 @@ class ManagerPrebuildTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_state(state)
 
+    def test_changed_local_release_recipe_rebuilds_existing_official_versions(self):
+        channels = approved_channels()
+        _, state = plan(channels, {})
+        changed = '0' * 64 if state['recipe_sha256'] != '0' * 64 else '1' * 64
+        with patch('manager_prebuild.recipe_hash', return_value=changed):
+            with self.assertRaisesRegex(ValueError, '预编译记录'):
+                validate_state(state)
+            matrix, new_state = plan(channels, {})
+            self.assertEqual(10, len(matrix['include']))
+            self.assertEqual(changed, new_state['recipe_sha256'])
+
     def test_evicted_state_recovers_from_successful_verified_standalone_run(self):
         channels = approved_channels()
         _, state = plan(channels, {})

@@ -47,8 +47,8 @@ jobs:
       timeout-minutes: 2
       with:
         path: ${{ runner.temp }}/gki-manager-apk-observations.json
-        key: gki-manager-apk-observations-v3-${{ github.run_id }}-${{ github.run_attempt }}
-        restore-keys: gki-manager-apk-observations-v3-
+        key: gki-manager-apk-observations-v4-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: gki-manager-apk-observations-v4-
     - name: 选择需要预编译的官方 APK 更新
       id: manager-prebuild
       env:
@@ -2279,4 +2279,4 @@ jobs:
       continue-on-error: true
       with:
         path: ${{ runner.temp }}/gki-manager-apk-observations.json
-        key: gki-manager-apk-observations-v3-${{ github.run_id }}-${{ github.run_attempt }}
+        key: gki-manager-apk-observations-v4-${{ github.run_id }}-${{ github.run_attempt }}
