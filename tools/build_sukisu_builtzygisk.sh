@@ -4,9 +4,13 @@ set -euo pipefail
 source_dir="$1"
 submodule_path=external/BuiltZygisk
 submodule_dir="$source_dir/$submodule_path"
-source_url=https://github.com/SukiSU-Nova/BuiltZygisk
-if [ "$(git -C "$source_dir" config -f .gitmodules --get submodule.external/BuiltZygisk.url)" != "$source_url" ]; then
-  echo 'Unexpected official Nova BuiltZygisk repository.' >&2
+source_url="$(git -C "$source_dir" config --blob HEAD:.gitmodules --get-all submodule.external/BuiltZygisk.url)"
+case "$source_url" in
+  https://github.com/SukiSU-Nova/BuiltZygisk|https://git.zako.shirkneko.top:20004/shirkneko/BuiltZygisk.git) ;;
+  *) echo 'Unexpected official Nova BuiltZygisk repository.' >&2; exit 1 ;;
+esac
+if ! git -C "$source_dir" diff --quiet HEAD -- .gitmodules; then
+  echo 'The Nova BuiltZygisk dependency declarations differ from the fixed source.' >&2
   exit 1
 fi
 tree_entry="$(git -C "$source_dir" ls-tree --format='%(objectmode) %(objectname)' HEAD -- "$submodule_path")"
