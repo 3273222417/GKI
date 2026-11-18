@@ -161,7 +161,7 @@ class OfficialSyncReportTests(unittest.TestCase):
         report = self.report()
         self.assertEqual(10, len(report['source_changes']))
         self.assertEqual({'SukiSU', 'BakaSU', 'SUSFS'}, {item['source'] for item in report['source_changes']})
-        self.assertIn('[SukiSU](https://github.com/SukiSU-Ultra/SukiSU-Ultra)', report['summary_markdown'])
+        self.assertIn('[SukiSU-Nova](https://github.com/SukiSU-Nova/SukiSU-Nova)', report['summary_markdown'])
         self.assertIn('[BakaSU](https://github.com/Baka-SU/BakaSU)', report['summary_markdown'])
         self.assertNotIn('### 官方源码和版本标签', report['summary_markdown'])
         self.assertIn('v4.2.1-r2', json.dumps(report['source_changes']))
@@ -204,8 +204,8 @@ class OfficialSyncReportTests(unittest.TestCase):
         report = self.report(versions=versions)
         body = report['summary_markdown']
         section = body.split('### 本次变化的管理器版本', 1)[1].split('### 发生变化的官方上游', 1)[0]
-        self.assertIn('| SukiSU | 测试版 | `41074` → `41075` |', section)
-        self.assertNotIn('| SukiSU | 正式版', section)
+        self.assertIn('| SukiSU-Nova | 测试版 | `41074` → `41075` |', section)
+        self.assertNotIn('| SukiSU-Nova | 正式版', section)
         self.assertNotIn('| BakaSU |', section)
         self.assertIn('本次检查没有编译 APK', body)
         self.assertFalse(report['build_performed'])
@@ -215,8 +215,8 @@ class OfficialSyncReportTests(unittest.TestCase):
         self.refresh()
         report = self.report(versions=version_observations(self.before, self.after))
         section = report['summary_markdown'].split('### 本次变化的管理器版本', 1)[1].split('### 发生变化的官方上游', 1)[0]
-        self.assertIn('| SukiSU | 正式版 | `41074` → `41074` |', section)
-        self.assertNotIn('| SukiSU | 测试版', section)
+        self.assertIn('| SukiSU-Nova | 正式版 | `41074` → `41074` |', section)
+        self.assertNotIn('| SukiSU-Nova | 测试版', section)
         self.assertNotIn('| BakaSU |', section)
 
     def test_default_branch_change_does_not_claim_a_test_update_when_dev_is_still_selected(self):
@@ -234,7 +234,7 @@ class OfficialSyncReportTests(unittest.TestCase):
         versions['status'] = 'partial'
         versions['after'][1].update(status='unknown', version_code=None)
         report = self.report(versions=versions)
-        self.assertIn('| SukiSU | 测试版 | `41075` → 未能确认版本号 |', report['summary_markdown'])
+        self.assertIn('| SukiSU-Nova | 测试版 | `41075` → 未能确认版本号 |', report['summary_markdown'])
         self.assertNotIn('`41076`', report['summary_markdown'])
 
     def test_unresolved_latest_selection_cannot_claim_changed_or_unchanged_test_version(self):
@@ -578,7 +578,7 @@ class OfficialSyncReportGitTests(unittest.TestCase):
         self.assertEqual([(self.before['sources'], self.after['sources'], cache)], self.observed)
         data = json.loads(report.read_text(encoding='utf-8'))
         self.assertEqual('observed', data['manager_version_codes']['status'])
-        self.assertIn('| SukiSU | 测试版 | `41075` → `41075` |', markdown.read_text(encoding='utf-8'))
+        self.assertIn('| SukiSU-Nova | 测试版 | `41075` → `41075` |', markdown.read_text(encoding='utf-8'))
         self.assertFalse(data['build_performed'])
 
     def observe(self, old, new, cache, versions):
@@ -621,7 +621,7 @@ class OfficialSyncReportGitTests(unittest.TestCase):
         self.assertTrue(report['has_changes'])
         self.assertEqual(baseline['digest'], report['digest'])
         self.assertEqual('not-observed', report['manager_version_codes']['status'])
-        self.assertIn('| SukiSU | 正式版 | 未能确认版本号 → 未能确认版本号 |', report['summary_markdown'])
+        self.assertIn('| SukiSU-Nova | 正式版 | 未能确认版本号 → 未能确认版本号 |', report['summary_markdown'])
         self.assertNotIn('fake-secret', output.getvalue() + report['summary_markdown'])
         self.assertIn('::warning::', output.getvalue())
 

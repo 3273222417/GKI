@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-from manager_variants import COMBINED_GROUPS, MANAGERS
+from manager_variants import COMBINED_GROUPS, MANAGERS, public_manager_selection
 from workflow_jobs import release_publish_steps, release_tag_concurrency
 
 
@@ -16,7 +16,8 @@ def expression(value):
 
 
 COMBINED = '(' + ' || '.join("inputs.kernelsu_variant == '" + selection + "'"
-                             for selection in COMBINED_GROUPS) + ')'
+                             for selection in dict.fromkeys(
+                                 (*COMBINED_GROUPS, *(public_manager_selection(value) for value in COMBINED_GROUPS)))) + ')'
 VARIANTS = {'variant': expression('fromJSON(needs.select-managers.outputs.active_managers)')}
 SELECTION_READY = "needs.select-managers.result == 'success' && needs.select-managers.outputs.active_count != '0'"
 

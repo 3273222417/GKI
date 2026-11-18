@@ -25,10 +25,18 @@ class ManagerSelectionTests(unittest.TestCase):
         self.assertEqual(set(variants.MANAGERS), {item for group in expected.values() for item in group})
 
     def test_menu_retains_all_single_managers_and_appends_the_two_groups(self):
-        self.assertEqual(variants.MANAGERS + tuple(variants.COMBINED_GROUPS), variants.MANAGER_SELECTIONS)
+        self.assertEqual(tuple(variants.public_manager_selection(value) for value in
+                               (*variants.MANAGERS, *variants.COMBINED_GROUPS)), variants.MANAGER_SELECTIONS)
         self.assertEqual(8, len(set(variants.MANAGER_SELECTIONS)))
         for manager in variants.MANAGERS:
             self.assertEqual((manager,), variants.selected_managers(manager))
+
+    def test_nova_menu_names_preserve_signed_variant_and_group_order(self):
+        self.assertIn('SukiSU-Nova', variants.MANAGER_SELECTIONS)
+        self.assertNotIn('SukiSU', variants.MANAGER_SELECTIONS)
+        self.assertEqual(('SukiSU',), variants.selected_managers('SukiSU-Nova'))
+        self.assertEqual(variants.COMBINED_MANAGERS,
+                         variants.selected_managers('SukiSU-Nova + BakaSU + KernelSU-Next'))
 
     def test_arbitrary_groups_reordering_and_invalid_types_are_rejected(self):
         for value in ('', 'KernelSU + KowSU + FinaSU', 'KowSU + KernelSU', 'SukiSU + FinaSU',

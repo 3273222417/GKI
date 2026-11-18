@@ -19,7 +19,7 @@ import uuid
 
 from pin_build_dependencies import CompatibilityError, load_profile
 from resolve_build_sources import (NoRedirect as GitHubNoRedirect, SourceResolutionError,
-                                   github_commit, github_json, validate_ref)
+                                   github_commit, github_json, github_transport_repository, validate_ref)
 from shared_susfs_source import OFFICIAL as SUSFS_GIT_URL
 from snapshot_ksu_source import GitCommandError, SnapshotError, git
 from susfs_sync_transport import retry_delay
@@ -32,7 +32,7 @@ ADDITIONAL_TRACKS = {variant.lower(): variant for variant in ADDITIONAL_MANAGERS
 SUSFS = 'simonpunk/susfs4ksu'
 TARGETS = ('android12-5.10', 'android13-5.15', 'android14-6.1', 'android15-6.6', 'android16-6.12')
 CANDIDATE_PATH = 'data/upstream-candidates.json'
-TITLE = 'chore: review official SukiSU, BakaSU and SUSFS updates'
+TITLE = 'chore: review official SukiSU-Nova, BakaSU and SUSFS updates'
 BRANCH = 'automation/official-updates'
 SHA = re.compile(r'[0-9a-fA-F]{40}\Z')
 LOOKUP_ATTEMPTS = 3
@@ -430,19 +430,20 @@ def acknowledged(root: Path) -> dict | None:
 
 def changes(current: dict, snapshot: dict) -> list[dict[str, str]]:
     selected = []
+    suki_url = 'https://github.com/' + github_transport_repository(SUKISU)
     suki = snapshot['sukisu']
     if suki['head'] != current['sukisu']:
         selected.append({'source': 'SukiSU', 'ref': suki['branch'], 'current': current['sukisu'], 'candidate': suki['head'],
-                         'url': f'https://github.com/{SUKISU}/commit/' + suki['head']})
+                         'url': suki_url + '/commit/' + suki['head']})
     release = suki['release']
     if release and release['newer_than_baseline'] and release['commit'] != current['sukisu']:
         selected.append({'source': 'SukiSU release', 'ref': release['tag'], 'current': current['sukisu'],
-                         'candidate': release['commit'], 'url': f'https://github.com/{SUKISU}/releases/tag/' + quote(release['tag'], safe='')})
+                         'candidate': release['commit'], 'url': suki_url + '/releases/tag/' + quote(release['tag'], safe='')})
     development = suki.get('development')
     if development and development['head'] not in (current['sukisu'], suki['head']):
         selected.append({'source': 'SukiSU development', 'ref': 'dev', 'current': current['sukisu'],
                          'candidate': development['head'],
-                         'url': f'https://github.com/{SUKISU}/commit/' + development['head']})
+                         'url': suki_url + '/commit/' + development['head']})
     if 'bakasu' in snapshot:
         baka = snapshot['bakasu']
         selected.append({'source': 'BakaSU', 'ref': baka['branch'], 'current': '', 'candidate': baka['head'],
@@ -473,11 +474,12 @@ def changes(current: dict, snapshot: dict) -> list[dict[str, str]]:
 def report_text(current: dict, snapshot: dict, updates: list[dict]) -> str:
     lines = ['<!-- gki-official-candidates:v1 -->', heads_marker(snapshot),
              '检测到官方源码的新候选版本。本 PR 记录更新提示，尚未将候选版本设为构建版本。', '',
-             f"当前验证基线：SukiSU `{current['sukisu']}`，SUSFS `{current['susfs_version']}`。", '',
+             f"当前验证基线：SukiSU-Nova `{current['sukisu']}`，SUSFS `{current['susfs_version']}`。", '',
              '| 官方源码 | 分支/版本 | 当前验证提交 | 候选提交 |', '| --- | --- | --- | --- |']
     for item in updates:
         old = item['current'][:12] or '未设固定验证基线'
-        lines.append(f"| {item['source']} | `{item['ref']}` | `{old}` | [`{item['candidate'][:12]}`]({item['url']}) |")
+        label = re.sub(r'^SukiSU(?= |$)', 'SukiSU-Nova', item['source'])
+        lines.append(f"| {label} | `{item['ref']}` | `{old}` | [`{item['candidate'][:12]}`]({item['url']}) |")
     lines.extend(['', '后续需要核对内核 API、SUSFS hook/ABI、管理器包名及签名，再执行对应内核构建验证。',
                   '`build-compatibility.json` 和已验证的构建提交保持不变；本次检测未编译候选内核。',
                   '合并本 PR 仅确认已收到这些官方更新提示，后续出现不同提交时会再次提示。', ''])

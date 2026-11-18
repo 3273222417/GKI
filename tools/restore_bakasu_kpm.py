@@ -27,12 +27,16 @@ MAX_PATCH = 16 * 1024 * 1024
 SHA = re.compile(r'[0-9a-f]{64}\Z')
 REF = re.compile(r'[0-9a-f]{40}\Z')
 NATIVE_BUILD_INPUTS = {
-    'kernel/Makefile': '0f3e28f59311db0c8383600f0294cec5b8e4d6cc0fb229b5723b9ff539e08992',
-    'kernel/tools/check_symbol.c': 'e1498452044010e383dd5a4d16993576337d28f91769b829ec416e76e22bfdc2',
-    'kernel/tools/code_generation/code_generation.mk': '7216cdc24d5c6c5196ac53587ce79981d1ddc18f0d8d5c2e609b4cbd54b3871f',
-    'kernel/tools/code_generation/syscall_no/syscall_no.mk': '5d65354bc6cc01fdb4c288ef69b5365e1b98cfe7619a8c942cbde99a3253b894',
-    'kernel/tools/code_generation/syscall_no/syscall_no.c': '92b1ef09e02b6b0c069c7ab2ffe64ddc90943df39f2f5963b83a29fcc0365226',
-    'kernel/tools/code_generation/preinit_runner/preinit_runner.mk': '3461eaa72bd7ca96933fae3797b7f6e828c127ea042118dbc43d902361dd5c65',
+    'kernel/Makefile': ('0f3e28f59311db0c8383600f0294cec5b8e4d6cc0fb229b5723b9ff539e08992',),
+    'kernel/tools/check_symbol.c': ('e1498452044010e383dd5a4d16993576337d28f91769b829ec416e76e22bfdc2',),
+    'kernel/tools/code_generation/code_generation.mk': ('7216cdc24d5c6c5196ac53587ce79981d1ddc18f0d8d5c2e609b4cbd54b3871f',),
+    'kernel/tools/code_generation/syscall_no/syscall_no.mk': ('5d65354bc6cc01fdb4c288ef69b5365e1b98cfe7619a8c942cbde99a3253b894',),
+    'kernel/tools/code_generation/syscall_no/syscall_no.c': ('92b1ef09e02b6b0c069c7ab2ffe64ddc90943df39f2f5963b83a29fcc0365226',),
+    'kernel/tools/code_generation/preinit_runner/preinit_runner.mk': (
+        '3461eaa72bd7ca96933fae3797b7f6e828c127ea042118dbc43d902361dd5c65',
+        # 7b65bde uses make -f for headers_install; runner flags and outputs match.
+        '39c3781b4ad2186ad2c11425e5c67a27f484808131f3a941f5572f49a78931eb',
+    ),
 }
 NATIVE_BUILD_OUTPUTS = frozenset((
     'kernel/check_symbol', 'kernel/compile_commands.json', 'kernel/compat/syscall_no.h',
@@ -258,7 +262,7 @@ def native_build_contract(source: Path) -> None:
     reference = os.fsdecode(git(source, 'rev-parse', '--verify', 'HEAD')).strip()
     for name, expected in NATIVE_BUILD_INPUTS.items():
         original = head_file(source, reference, name)
-        if original is None or digest(original) != expected or regular(safe_path(source, name), MAX_FILE) != original:
+        if original is None or digest(original) not in expected or regular(safe_path(source, name), MAX_FILE) != original:
             raise KpmPortError('Review the changed official BakaSU native build generator: ' + name)
 
 

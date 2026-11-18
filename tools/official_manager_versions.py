@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import time
 
-from manager_variants import MANAGERS, manager_profile
+from manager_variants import MANAGERS, manager_profile, public_manager_selection
 from prepare_manager_lkm import LkmError, native_version_code
 from resolve_build_sources import github_transport_repository
 from snapshot_ksu_source import SnapshotError, git, temporary_directory
@@ -160,10 +160,11 @@ def _gradle_version(text: str, count: int, variant: str) -> int:
             or len(counters) != 1 or _compact(counters[0]) != expected_counter or len(bodies) != 1):
         raise SnapshotError('Native SukiSU manager history calculation changed')
     formula = re.fullmatch(r'valcommitCount=getGitCommitCount\(\)valmajor=([0-9]+)valend=([0-9]+)'
-                           r'returnmajor\*10000\+commitCount-end', _compact(bodies[0]))
+                           r'returnmajor\*10000\+commitCount([+-])end', _compact(bodies[0]))
     if not formula:
         raise SnapshotError('Native SukiSU manager version formula changed')
-    return int(formula[1]) * 10000 + count - int(formula[2])
+    offset = int(formula[2]) if formula[3] == '+' else -int(formula[2])
+    return int(formula[1]) * 10000 + count + offset
 
 
 def _version(repository: Path, reference: str, count: int, variant: str, deadline: float) -> int:
@@ -187,12 +188,18 @@ def observe_versions(before_snapshot: dict | None, after_snapshot: dict | None,
     counts: dict[tuple[str, str], int | None] = {}
     versions: dict[tuple[str, str], int | None] = {}
 
+    def failed(variant: str, reference: str, stage: str, error: Exception) -> None:
+        reason = (str(error) if isinstance(error, (SnapshotError, LkmError))
+                  else 'Official source metadata could not be inspected')
+        print(f'::warning::{public_manager_selection(variant)} {reference[:12]} {stage}: {reason}', flush=True)
+
     def history(variant: str, reference: str) -> int:
         key = variant, reference
         if variant not in repositories:
             try:
                 repositories[variant] = _repository(Path(cache_root).absolute(), variant, deadline)
-            except (SnapshotError, OSError, ValueError):
+            except (SnapshotError, OSError, ValueError) as error:
+                failed(variant, reference, 'history cache', error)
                 repositories[variant] = None
         repository = repositories[variant]
         if repository is None:
@@ -200,7 +207,8 @@ def observe_versions(before_snapshot: dict | None, after_snapshot: dict | None,
         if key not in counts:
             try:
                 counts[key] = _count(repository, reference, deadline)
-            except (SnapshotError, OSError, ValueError):
+            except (SnapshotError, OSError, ValueError) as error:
+                failed(variant, reference, 'full history', error)
                 counts[key] = None
         if counts[key] is None:
             raise SnapshotError('Manager full history could not be observed')
@@ -245,7 +253,8 @@ def observe_versions(before_snapshot: dict | None, after_snapshot: dict | None,
                     if key not in versions:
                         try:
                             versions[key] = _version(repositories[variant], reference, count, variant, deadline)
-                        except (SnapshotError, LkmError, OSError, ValueError):
+                        except (SnapshotError, LkmError, OSError, ValueError) as error:
+                            failed(variant, reference, 'native version formula', error)
                             versions[key] = None
                     if versions[key] is not None:
                         row.update(version_code=versions[key], status='observed')

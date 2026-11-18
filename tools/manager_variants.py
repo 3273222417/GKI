@@ -15,7 +15,10 @@ COMBINED_GROUPS = {
     COMBINED_SELECTION: COMBINED_MANAGERS,
     'KowSU + KernelSU + FinaSU': ('KowSU', 'KernelSU', 'FinaSU'),
 }
-MANAGER_SELECTIONS = MANAGERS + tuple(COMBINED_GROUPS)
+PUBLIC_SUKISU = 'SukiSU-Nova'
+PUBLIC_SELECTIONS = {value: value.replace('SukiSU', PUBLIC_SUKISU)
+                     for value in (MANAGERS + tuple(COMBINED_GROUPS))}
+MANAGER_SELECTIONS = tuple(PUBLIC_SELECTIONS.values())
 SUKISU_ULTRA_PACKAGE = 'com.sukisu.ultra'
 SUKISU_NOVA_PACKAGE = 'com.sukisu.nova'
 _SUKISU_FILENAMES = {SUKISU_ULTRA_PACKAGE: 'SukiSU', SUKISU_NOVA_PACKAGE: 'SukiSU_Nova'}
@@ -97,10 +100,21 @@ def manager_source_package(variant: str, source: Path) -> str:
 
 def selected_managers(selection: str) -> tuple[str, ...]:
     """Expand the menu once; every build still receives exactly one manager."""
+    selection = internal_manager_selection(selection)
     if isinstance(selection, str) and selection in COMBINED_GROUPS:
         return COMBINED_GROUPS[selection]
     manager_profile(selection)
     return (selection,)
+
+
+def public_manager_selection(selection: str) -> str:
+    return PUBLIC_SELECTIONS.get(selection, selection)
+
+
+def internal_manager_selection(selection: str) -> str:
+    if isinstance(selection, str):
+        return next((key for key, public in PUBLIC_SELECTIONS.items() if public == selection), selection)
+    return selection
 
 
 def valid_manager_apk_filename(name: str, variant: str = 'SukiSU', *,

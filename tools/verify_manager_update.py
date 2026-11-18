@@ -141,7 +141,8 @@ def check_source(repository: Path, variant: str, reference: str, count: int, *,
                 if legacy_susfs:
                     checks.append('SUSFS 2.3 完整接入及原生生命周期')
             elif variant == 'BakaSU':
-                from restore_bakasu_kpm import restore_bakasu_kpm, verify_bakasu_kpm_port
+                from restore_bakasu_kpm import native_build_contract, restore_bakasu_kpm, verify_bakasu_kpm_port
+                native_build_contract(source)
                 from ensure_bakasu_symbol_lookup import validate_native_symbol_lookup
                 restore_bakasu_kpm(source, reference)
                 verify_bakasu_kpm_port(source, reference)
@@ -354,7 +355,8 @@ def render_report(result: dict) -> str:
     lines = ['### 同步配套验证', '', '配套验证通过。' if result['passed'] else '**配套验证失败，未同步。**']
     for row in (row for row in result['rows'] if row['status'] == 'failure'):
         reason = row['reason'].replace('`', '').replace('|', '/').replace('\n', ' ')
-        lines.append('\n' + row['source'] + ' ' + row['channel'] + '：失败，未同步。' + reason)
+        name = 'SukiSU-Nova' if row['source'] == 'SukiSU' else row['source']
+        lines.append('\n' + name + ' ' + row['channel'] + '：失败，未同步。' + reason)
     return '\n'.join(lines) + '\n'
 
 
@@ -365,10 +367,12 @@ def write_promotion_report(path: Path, plan: dict):
         detail = row['reason'].replace('\n', ' ')
         version = (' ' + str(row['version_code'])) if row['version_code'] is not None else ''
         state = '通过，可同步' if row['status'] == 'passed' else '待适配，保留当前版本'
-        lines.append(f"- {row['source']}{version} {row['channel']} · {state}。{detail}")
+        name = 'SukiSU-Nova' if row['source'] == 'SukiSU' else row['source']
+        lines.append(f"- {name}{version} {row['channel']} · {state}。{detail}")
     for row in plan['pin_failures']:
         reason = row['reason'].replace('\n', ' ')
-        lines.append(f"- {row['source']} {row['channel']} · 保留原 SUSFS 构建引用。{reason}")
+        name = 'SukiSU-Nova' if row['source'] == 'SukiSU' else row['source']
+        lines.append(f"- {name} {row['channel']} · 保留原 SUSFS 构建引用。{reason}")
     if not plan['rows'] and not plan['pin_failures']:
         lines.append('本次没有待同步的管理器版本。')
     path.with_suffix('.md').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')

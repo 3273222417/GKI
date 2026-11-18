@@ -44,7 +44,7 @@ class OplusWorkflowTests(unittest.TestCase):
         self.assertEqual(len(fields), 10)
         from manager_variants import MANAGER_SELECTIONS
         self.assertEqual(fields['kernelsu_variant']['options'], list(MANAGER_SELECTIONS))
-        self.assertEqual(fields['kernelsu_variant']['default'], 'SukiSU')
+        self.assertEqual(fields['kernelsu_variant']['default'], 'SukiSU-Nova')
         self.assertEqual([key for key in fields if fields[key]['default'] is True],
                          ['enable_susfs', 'use_kpm', 'use_lz4kd'])
         self.assertEqual(fields['kernelsu_branch'], self.base['on']['workflow_dispatch']['inputs']['kernelsu_branch'])
@@ -284,7 +284,8 @@ class OplusWorkflowTests(unittest.TestCase):
         with mock.patch.dict(os.environ, env):
             exec(compile(heredoc(workflow.PROFILE_INPUTS), '<workflow frozen inputs>', 'exec'), {})
         self.assertEqual(json.loads(self.directory.joinpath('oplus-profile.json').read_text()), profile)
-        self.assertEqual(json.loads(self.directory.joinpath('oplus-inputs.json').read_text()), inputs)
+        self.assertEqual(json.loads(self.directory.joinpath('oplus-inputs.json').read_text()),
+                         {**inputs, 'kernelsu_variant': 'SukiSU'})
         inputs['unreviewed_extra_flag'] = True
         with mock.patch.dict(os.environ, {**env, 'OPLUS_INPUTS': json.dumps(inputs)}), self.assertRaises(ValueError):
             exec(compile(heredoc(workflow.PROFILE_INPUTS), '<workflow rejects extra menu>', 'exec'), {})
@@ -418,7 +419,9 @@ class OplusWorkflowTests(unittest.TestCase):
     def test_generated_fourth_workflow_is_reproducible_yaml_with_boolean_on(self):
         current = generator.load_yaml(ROOT / workflow.OUTPUT)
         from combined_manager_workflow import add_combined
-        self.assertEqual(current, add_combined(self.document, oplus=True)[0])
+        expected = add_combined(self.document, oplus=True)[0]
+        generator.public_workflow_names(expected)
+        self.assertEqual(current, expected)
         self.assertIs(current['on']['workflow_dispatch']['inputs']['enable_susfs']['default'], True)
         self.assertIs(current['jobs']['build-oplus-kernel']['strategy']['fail-fast'], False)
 

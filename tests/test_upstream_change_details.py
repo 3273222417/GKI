@@ -29,7 +29,7 @@ def comparison(**changes):
 
 class CommitDetailsTests(unittest.TestCase):
     def test_official_urls_cover_all_six_managers_and_susfs(self):
-        expected = {'SukiSU': 'SukiSU-Ultra/SukiSU-Ultra', 'BakaSU': 'Baka-SU/BakaSU',
+        expected = {'SukiSU': 'SukiSU-Nova/SukiSU-Nova', 'BakaSU': 'Baka-SU/BakaSU',
                     'KernelSU-Next': 'KernelSU-Next/KernelSU-Next', 'KernelSU': 'tiann/KernelSU',
                     'KowSU': 'KOWX712/KernelSU', 'FinaSU': 'LyraVoid/FinaSU'}
         for name, repo in expected.items():
@@ -143,10 +143,10 @@ class DetailedReportTests(unittest.TestCase):
         body = self.report()['summary_markdown']
         section = body.split('### 本次变化的管理器版本')[1].split('### 发生变化的官方上游')[0]
         self.assertIn('测试版', section)
-        self.assertNotIn('| SukiSU | 正式版 |', section)
+        self.assertNotIn('| SukiSU-Nova | 正式版 |', section)
         self.assertNotIn('| BakaSU |', section)
         self.assertIn('`41075`', section)
-        self.assertIn('[SukiSU](https://github.com/SukiSU-Ultra/SukiSU-Ultra)', body)
+        self.assertIn('[SukiSU-Nova](https://github.com/SukiSU-Nova/SukiSU-Nova)', body)
         self.assertNotIn('### 官方源码和版本标签', body)
 
     def test_kernel_classification_names_exact_origin_and_latest_selection(self):
@@ -192,7 +192,7 @@ class DetailedReportTests(unittest.TestCase):
             'source': 'SukiSU', 'before': OLD, 'after': NEW, 'channels': ['默认分支'],
             'status': 'observed', 'topics': ['另一分支的旧变化'], 'commits': []}]
         body = reports.render_report(report)
-        self.assertIn('SukiSU 测试版：补充 SELinux inode 初始化和失败回收', body)
+        self.assertIn('SukiSU-Nova 测试版：补充 SELinux inode 初始化和失败回收', body)
         self.assertNotIn('另一分支的旧变化', body)
         self.assertNotIn('官方提交的具体内容', body)
 

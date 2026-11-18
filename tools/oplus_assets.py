@@ -156,11 +156,12 @@ def provenance() -> dict:
     return result
 
 
-def filename(profile: dict, variant: str) -> str:
+def filename(profile: dict, variant: str, package: str | None = None) -> str:
     if variant not in MANAGERS:
         raise AssetError('Only the paired SukiSU and BakaSU managers are supported')
     family = {'骁龙': 'Snapdragon', '天玑': 'Dimensity', '通用 GKI': 'Generic'}[catalog.platform_family(profile['platform'])]
-    return f"Oplus-{family}-{profile['android_version']}-{profile['kernel']}-{variant}-AnyKernel3.zip"
+    label = manager_display_name(variant, package)
+    return f"Oplus-{family}-{profile['android_version']}-{profile['kernel']}-{label}-AnyKernel3.zip"
 
 
 def release_prefix(release: str, profile: dict) -> str:
@@ -174,17 +175,20 @@ def release_prefix(release: str, profile: dict) -> str:
     return match[1]
 
 
-def anykernel_script(profile: dict, variant: str, prefix: str) -> bytes:
+def anykernel_script(profile: dict, variant: str, prefix: str, package: str | None = None) -> bytes:
     from oplus_cctv import is_cctv, installer_script
     if is_cctv(profile):
-        return installer_script(profile, variant, prefix)
+        script = installer_script(profile, variant, prefix)
+        label = manager_display_name(variant, package)
+        return script.replace(f" {profile['kernel']} {variant}\n".encode(),
+                              f" {profile['kernel']} {label}\n".encode(), 1)
     # This replaces the upstream example's device/ramdisk/fstab modifications.
     # Explicit boot avoids AnyKernel3's auto preference for init_boot. The
     # split/flash pair preserves an existing ramdisk and permits ramdisk-free
     # boot images; platform/KMI guards run before either operation.
     return f'''#!/system/bin/sh
 properties() {{ '
-kernel.string=Oplus {catalog.platform_family(profile['platform'])} {profile['kernel']} {variant}
+kernel.string=Oplus {catalog.platform_family(profile['platform'])} {profile['kernel']} {manager_display_name(variant, package)}
 do.devicecheck=0
 do.modules=0
 do.systemless=0
@@ -321,7 +325,7 @@ def package(profile: dict, kernel_root: Path, image_path: Path, template: Path, 
         if selected is None or selected['version'] not in ('v2.3.0', 'v2.4.0'):
             raise AssetError('OPlus packaging requires a supported prepared SUSFS identity for ' + target)
         expected_susfs = selected['version']
-    context = {'file': filename(profile, variant), 'android_version': profile['android_version'],
+    context = {'file': filename(profile, variant, os.environ.get('MANAGER_PACKAGE')), 'android_version': profile['android_version'],
                'kernel_version': profile['kernel_version'], 'sub_level': profile['sub_level'],
                'ksu_variant': variant, 'ksu_branch': os.environ.get('KSU_BRANCH', ''), 'ksu_ref': reference,
                'ksu_version_code': os.environ.get('MANAGER_VERSION_CODE', ''),
@@ -387,7 +391,7 @@ def package(profile: dict, kernel_root: Path, image_path: Path, template: Path, 
     try:
         with zipfile.ZipFile(temporary, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             entries = {**runtime, 'Image': (image, 0o644),
-                       'anykernel.sh': (anykernel_script(profile, variant, prefix), 0o755),
+                       'anykernel.sh': (anykernel_script(profile, variant, prefix, metadata['manager_package']), 0o755),
                        MEMBER: ((json.dumps(metadata, ensure_ascii=False, sort_keys=True) + '\n').encode(), 0o644)}
             if payload is not None:
                 entries[PAYLOAD_MEMBER] = payload, 0o644
@@ -431,7 +435,7 @@ def validate_document(document: dict) -> None:
     except ValueError as error:
         raise AssetError(str(error)) from None
     variant = document.get('ksu_variant')
-    if document.get('file') != filename(profile, variant):
+    if document.get('file') not in (filename(profile, variant), filename(profile, variant, document.get('manager_package'))):
         raise AssetError('OPlus artifact filename does not match its platform, version and variant')
     if any(document.get(key) != profile[key] for key in ('android_version', 'kernel_version', 'sub_level')):
         raise AssetError('OPlus compiled target metadata differs from the official profile')
@@ -539,8 +543,10 @@ def read_kernel(path: Path, *, expected_filename: str | None = None) -> dict:
         for name, checksum in document['runtime_sha256'].items():
             if digest(archive.read(name)) != checksum:
                 raise AssetError('OPlus official AnyKernel3 runtime bytes changed')
-        script = anykernel_script(document['profile'], document['ksu_variant'], document['compatibility_prefix'])
-        if archive.read('anykernel.sh') != script:
+        script = anykernel_script(document['profile'], document['ksu_variant'], document['compatibility_prefix'],
+                                  document.get('manager_package'))
+        legacy_script = anykernel_script(document['profile'], document['ksu_variant'], document['compatibility_prefix'])
+        if archive.read('anykernel.sh') not in (script, legacy_script):
             raise AssetError('OPlus platform/full-version/KMI installation guards changed')
         payload = archive.read(PAYLOAD_MEMBER) if PAYLOAD_MEMBER in members else None
         verify_image(document, archive.read('Image'), payload)

@@ -342,7 +342,7 @@ class BakaKpmPortTests(unittest.TestCase):
         fixtures = ROOT / 'tests/fixtures/bakasu-native-build'
         for name, expected in port.NATIVE_BUILD_INPUTS.items():
             data = bytes.fromhex((fixtures / (name.replace('/', '_') + '.hex')).read_text('ascii'))
-            self.assertEqual(expected, port.digest(data))
+            self.assertIn(port.digest(data), expected)
             self.write(name, data)
         self.command('add', 'kernel')
         self.reference = self.commit('unchanged native build generators')
@@ -384,6 +384,22 @@ class BakaKpmPortTests(unittest.TestCase):
         self.native_build_outputs()
         name = 'kernel/tools/code_generation/syscall_no/syscall_no.c'
         self.write(name, (self.source / name).read_bytes() + b'/* changed */\n')
+        with self.assertRaisesRegex(ValueError, 'changed official.*generator'):
+            port.verify_bakasu_kpm_port(self.source, self.reference)
+
+    def test_updated_official_runner_generator_preserves_output_verification(self):
+        self.native_build_inputs()
+        name = 'kernel/tools/code_generation/preinit_runner/preinit_runner.mk'
+        fixture = ROOT / 'tests/fixtures/bakasu-native-build/preinit_runner-7b65bde.mk.hex'
+        data = bytes.fromhex(fixture.read_text('ascii'))
+        self.assertIn(port.digest(data), port.NATIVE_BUILD_INPUTS[name])
+        self.write(name, data)
+        self.command('add', name)
+        self.reference = self.commit('official runner headers_install invocation updated')
+        self.restore()
+        self.native_build_outputs()
+        port.verify_bakasu_kpm_port(self.source, self.reference)
+        self.write(name, data + b'# changed generator\n')
         with self.assertRaisesRegex(ValueError, 'changed official.*generator'):
             port.verify_bakasu_kpm_port(self.source, self.reference)
 

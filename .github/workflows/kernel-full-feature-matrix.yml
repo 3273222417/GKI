@@ -48,15 +48,15 @@ run-name: ${{ inputs.operation == '仅编译管理器安装包' && format('仅�
         required: true
         type: choice
         options:
-        - SukiSU
+        - SukiSU-Nova
         - BakaSU
         - KernelSU-Next
         - KernelSU
         - KowSU
         - FinaSU
-        - SukiSU + BakaSU + KernelSU-Next
+        - SukiSU-Nova + BakaSU + KernelSU-Next
         - KowSU + KernelSU + FinaSU
-        default: SukiSU
+        default: SukiSU-Nova
       kernelsu_branch:
         description: 版本
         required: true
@@ -187,15 +187,17 @@ jobs:
         python3 tools/resolve_manager_selection.py --selection "$MANAGER_SELECTION" --tier "$KSU_TIER" \
           --custom-ref "$CUSTOM_REF" --susfs "$ENABLE_SUSFS"
   prepare-matrix:
-    name: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant == 'KowSU + KernelSU
-      + FinaSU') && format('准备源码与构建目标 · {0}', matrix.variant) || '选择内核版本与补丁月份' }}
+    name: ${{ (inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next' || inputs.kernelsu_variant == 'KowSU + KernelSU
+      + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && format('准备源码与构建目标 · {0}', (matrix.variant
+      == 'SukiSU' && 'SukiSU-Nova' || matrix.variant)) || '选择内核版本与补丁月份' }}
     runs-on: ubuntu-24.04
     if: needs.select-managers.result == 'success' && needs.select-managers.outputs.active_count != '0' && (github.event_name
       == 'workflow_dispatch' && (inputs.operation == '编译内核' || inputs.operation == '仅编译管理器安装包'))
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     permissions:
       contents: read
       actions: write
@@ -691,7 +693,7 @@ jobs:
       matrix:
         variant: ${{ fromJSON(needs.select-managers.outputs.active_managers) }}
   build-sukisu-lkm:
-    name: ${{ matrix.variant }} 原生模块 / ${{ matrix.kmi }}
+    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 原生模块 / ${{ matrix.kmi }}
     needs:
     - select-managers
     - prepare-matrix
@@ -709,7 +711,8 @@ jobs:
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     timeout-minutes: 30
     defaults:
       run:
@@ -1006,14 +1009,15 @@ jobs:
         PY
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
   build-sukisu-manager:
-    name: 编译配套 ${{ matrix.variant }} 管理器 APK
+    name: 编译配套 ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 管理器 APK
     if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.select-managers.result == 'success'
       && needs.select-managers.outputs.active_count != '0' && (needs.build-sukisu-lkm.result == 'success' || needs.build-sukisu-lkm.result
       == 'skipped')
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     needs:
     - prepare-matrix
     - build-sukisu-lkm
@@ -2309,7 +2313,7 @@ jobs:
         variant: ${{ fromJSON(needs.select-managers.outputs.active_managers) }}
   build-kernel:
     name: ${{ matrix.kernel_version }}.${{ matrix.sub_level }}-${{ matrix.android_version }}-${{ matrix.os_patch_level }}-${{
-      matrix.variant }}
+      (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }}
     runs-on: ${{ vars.KERNEL_SELF_HOSTED == 'false' && 'ubuntu-24.04' || (startsWith(vars.KERNEL_RUNNER, '[') && fromJSON(vars.KERNEL_RUNNER)
       || vars.KERNEL_RUNNER || 'ubuntu-24.04') }}
     timeout-minutes: 120
@@ -2323,11 +2327,12 @@ jobs:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_MANAGER_METADATA: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_metadata', matrix.variant)] }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     steps: &id001
     - name: 设置组合构建文件名
       if: env.GKI_COMBINED_WORKER == 'true'
-      run: echo "GKI_MANAGER_SUFFIX=-${KSU_VARIANT}" >> "$GITHUB_ENV"
+      run: echo "GKI_MANAGER_SUFFIX=-${KSU_VARIANT/SukiSU/SukiSU-Nova}" >> "$GITHUB_ENV"
     - name: 构建信息摘要
       shell: bash
       run: |
@@ -2672,7 +2677,7 @@ jobs:
         python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
           https://github.com/WildKernels/kernel_patches.git kernel_patches
         python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
-          https://github.com/ShirkNeko/SukiSU_patch.git SukiSU_patch
+          https://github.com/SukiSU-Nova/SukiSU_patch.git SukiSU_patch
         echo "使用当前仓库补丁目录: $ZZH_PATCHES"
         python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
           https://github.com/Numbersf/Action-Build.git Action-Build --depth 1
@@ -2957,12 +2962,12 @@ jobs:
             ;;
           *) echo "Unsupported paired manager" >&2; exit 1 ;;
         esac
-    - name: 应用完整 SukiSU SUSFS 2.3 适配
+    - name: 应用完整 SukiSU-Nova SUSFS 2.3 适配
       if: env.SUSFS_COMPAT_VERSION == 'v2.3.0'
       run: |
         python3 "$GITHUB_WORKSPACE/tools/apply_susfs23.py" \
           --kernel-root "$KERNEL_ROOT" --susfs-dir "$SUSFS4KSU"
-    - name: 应用 SukiSU/BakaSU SUSFS 2.4 适配
+    - name: 应用 SukiSU-Nova/BakaSU SUSFS 2.4 适配
       if: env.SUSFS_SOURCE_VERSION == 'v2.4.0' && (matrix.variant == 'SukiSU' || matrix.variant == 'BakaSU')
       run: |
         python3 "$GITHUB_WORKSPACE/tools/suki_baka_susfs24.py" --source "$KERNEL_ROOT/KernelSU" \
@@ -2977,7 +2982,7 @@ jobs:
         ABK_FEATURE_FAILURE_MESSAGE: KernelSU SUSFS ABI compatibility integration failed
       working-directory: ${{ env.KERNEL_ROOT }}
       run: python3 "$GITHUB_WORKSPACE/.github/scripts/ensure-ksu-compat.py" "$KERNEL_ROOT"
-    - name: 配置 SukiSU 管理器信息
+    - name: 配置 SukiSU-Nova 管理器信息
       if: matrix.variant == 'SukiSU'
       env:
         BASH_ENV: ${{ 'aosp' == 'custom_git' && format('{0}/.github/scripts/custom-source-feature-env.sh', github.workspace)
@@ -7076,7 +7081,7 @@ jobs:
         else:
             print(f"{path} 的 Official 6.1-6.12 SELinux 导出已满足要求")
         PY
-    - name: 补齐 SukiSU SUSFS 内联 hook 符号
+    - name: 补齐 SukiSU-Nova SUSFS 内联 hook 符号
       if: env.SUSFS_COMPAT_VERSION != 'v2.3.0' && env.SUSFS_SOURCE_VERSION != 'v2.4.0' && (matrix.variant == 'SukiSU' && inputs.enable_susfs)
       env:
         BASH_ENV: ${{ 'aosp' == 'custom_git' && format('{0}/.github/scripts/custom-source-feature-env.sh', github.workspace)
@@ -7087,7 +7092,7 @@ jobs:
       run: |
         set -euo pipefail
         python3 "$GITHUB_WORKSPACE/.github/scripts/fix_sukisu_susfs.py" "$KERNEL_ROOT"
-    - name: 最终修复 SukiSU/BakaSU 源码兼容
+    - name: 最终修复 SukiSU-Nova/BakaSU 源码兼容
       if: env.SUSFS_COMPAT_VERSION != 'v2.3.0' && env.SUSFS_SOURCE_VERSION != 'v2.4.0' && (matrix.variant == 'SukiSU')
       env:
         BASH_ENV: ${{ 'aosp' == 'custom_git' && format('{0}/.github/scripts/custom-source-feature-env.sh', github.workspace)
@@ -7295,7 +7300,7 @@ jobs:
             exit 1
           fi
         fi
-    - name: 修复 SukiSU/BakaSU android16-6.12 源码兼容
+    - name: 修复 SukiSU-Nova/BakaSU android16-6.12 源码兼容
       if: (matrix.variant == 'SukiSU' || matrix.variant == 'BakaSU') && matrix.android_version == 'android16' && matrix.kernel_version
         == '6.12'
       env:
@@ -7960,12 +7965,13 @@ jobs:
         GKI_REQUEST_USE_NETWORKING: ${{ inputs.use_networking }}
       run: |
         if [ "${GKI_COMBINED_WORKER:-false}" = true ]; then
-          META_FILE="${META_FILE%-AnyKernel3.zip}-${KSU_VARIANT}-AnyKernel3.zip"
+          manager_name="${KSU_VARIANT/SukiSU/SukiSU-Nova}"
+          META_FILE="${META_FILE%-AnyKernel3.zip}-${manager_name}-AnyKernel3.zip"
           export META_FILE
           for image in ./*-boot*.img; do
             [ -f "$image" ] || continue
             base="${image%%-boot*}"; rest="${image#"$base"}"
-            mv -- "$image" "${base}-${KSU_VARIANT}${rest}"
+            mv -- "$image" "${base}-${manager_name}${rest}"
           done
         fi
         python3 tools/capture_build_metadata.py --kernel-root "$KERNEL_ROOT" \
@@ -8161,7 +8167,8 @@ jobs:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_MANAGER_METADATA: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_metadata', matrix.variant)] }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     steps: *id001
     if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.build-sukisu-manager.result == 'success'
       && inputs.operation == '编译内核' && needs.prepare-matrix.outputs.overflow_count != '0'

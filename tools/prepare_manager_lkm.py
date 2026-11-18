@@ -140,10 +140,14 @@ def native_version_code(source: Path, count: int, *, variant: str | None = None)
             raise LkmError("Native KernelSU version formula changed; review its history calculation")
         values[key] = int(found[0])
     formula = re.findall(r"^KSU_VERSION[ \t]*:=[^\r\n]+", text, re.M)
-    if (len(formula) != 1 or "$(shell expr $(VERSION_BASE) + $(LOCAL_COUNT) - $(VERSION_OFFSET))" not in formula[0]
-            or type(count) is not int or count < 1):
+    expression = (re.fullmatch(r'KSU_VERSION[ \t]*:=[ \t]*\$\(if \$\(LOCAL_COUNT\),'
+                              r'\$\(shell expr \$\(VERSION_BASE\) \+ \$\(LOCAL_COUNT\) ([+-]) '
+                              r'\$\(VERSION_OFFSET\)\),(?:\$\(VERSION_BASE\)|[0-9]+)\)[ \t]*', formula[0])
+                  if len(formula) == 1 else None)
+    if expression is None or type(count) is not int or count < 1:
         raise LkmError("Native KernelSU version formula changed; review its history calculation")
-    version = values["VERSION_BASE"] + count - values["VERSION_OFFSET"]
+    offset = values["VERSION_OFFSET"] if expression[1] == '+' else -values["VERSION_OFFSET"]
+    version = values["VERSION_BASE"] + count + offset
     if not 1 <= version <= 2100000000:
         raise LkmError("The native KernelSU source history produced an invalid version code")
     return version

@@ -1,7 +1,9 @@
 """Source-derived APK version observations use real full Git histories."""
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import copy
+import io
 import itertools
 import json
 from pathlib import Path
@@ -165,6 +167,36 @@ class OfficialManagerVersionTests(unittest.TestCase):
         self.assertEqual('unknown', self.row(result, 'BakaSU')['status'])
         self.assertIsNone(self.row(result, 'BakaSU')['version_code'])
         self.assertEqual('observed', self.row(result)['status'])
+
+    def test_nova_additive_offset_uses_the_frozen_full_history(self):
+        # Nova 1439545 changed both formulas from subtraction to addition.
+        source = self.upstreams['SukiSU']
+        kbuild = SUKI_KBUILD.replace('40000', '30000').replace('2815', '996').replace(
+            ' - $(VERSION_OFFSET)', ' + $(VERSION_OFFSET)')
+        gradle = SUKI_GRADLE.replace('major = 4', 'major = 3').replace('end = 2815', 'end = 996').replace(
+            'commitCount - end', 'commitCount + end')
+        (source / 'kernel/Kbuild').write_text(kbuild, encoding='utf-8')
+        (source / 'manager/build.gradle.kts').write_text(gradle, encoding='utf-8')
+        reference = self.commit('SukiSU')
+        self.state['sukisu']['head'] = reference
+
+        result = self.observe()
+        self.assertEqual('observed', result['status'])
+        self.assertEqual(30998, self.row(result)['version_code'])
+        self.assertEqual(reference, self.row(result)['commit'])
+        self.assertEqual(37186, self.row(result, channel='正式版')['version_code'])
+
+    def test_opposite_source_offset_operators_remain_unknown_and_report_the_reason(self):
+        source = self.upstreams['SukiSU'] / 'kernel/Kbuild'
+        source.write_text(SUKI_KBUILD.replace(' - $(VERSION_OFFSET)', ' + $(VERSION_OFFSET)'), encoding='utf-8')
+        self.state['sukisu']['head'] = self.commit('SukiSU')
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = self.observe()
+        self.assertEqual('unknown', self.row(result)['status'])
+        self.assertIsNone(self.row(result)['version_code'])
+        self.assertIn('::warning::SukiSU-Nova', output.getvalue())
+        self.assertIn('Manager and native kernel version formulas disagree', output.getvalue())
 
     def test_failed_main_history_does_not_guess_latest_even_with_cached_dev(self):
         base = self.refs['SukiSU']

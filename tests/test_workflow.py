@@ -71,7 +71,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_manager_choices_only_expose_two_variants_and_two_shared_versions(self):
         fields = self.workflow['on']['workflow_dispatch']['inputs']
-        self.assertEqual(fields['kernelsu_variant']['default'], 'SukiSU')
+        self.assertEqual(fields['kernelsu_variant']['default'], 'SukiSU-Nova')
         self.assertEqual(fields['kernelsu_variant']['options'], list(MANAGER_SELECTIONS))
         self.assertEqual(fields['kernelsu_branch']['default'], '最新版')
         self.assertEqual(fields['kernelsu_branch']['description'], '版本')

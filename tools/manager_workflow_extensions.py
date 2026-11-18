@@ -25,6 +25,7 @@ def effective_inputs(value):
 def extend_gki(workflow: dict) -> dict:
     fields = workflow['on']['workflow_dispatch']['inputs']
     fields['kernelsu_variant']['options'] = list(MANAGER_SELECTIONS)
+    fields['kernelsu_variant']['default'] = 'SukiSU-Nova'
     job = workflow['jobs']['build-kernel']
     job['env']['GKI_MANAGER_METADATA'] = RECEIPT
     source_steps = {'恢复本次不可变源码缓存', '恢复本次不可变源码备份', '核实共享源码缓存',
@@ -77,15 +78,16 @@ def extend_gki(workflow: dict) -> dict:
         if field in dispatch_fields:
             capture['env']['GKI_REQUEST_' + field.upper()] = '${{ inputs.' + field + ' }}'
     capture['run'] = ('if [ "${GKI_COMBINED_WORKER:-false}" = true ]; then\n'
-                      '  META_FILE="${META_FILE%-AnyKernel3.zip}-${KSU_VARIANT}-AnyKernel3.zip"\n'
+                      '  manager_name="${KSU_VARIANT/SukiSU/SukiSU-Nova}"\n'
+                      '  META_FILE="${META_FILE%-AnyKernel3.zip}-${manager_name}-AnyKernel3.zip"\n'
                       '  export META_FILE\n'
                       '  for image in ./*-boot*.img; do\n'
                       '    [ -f "$image" ] || continue\n'
                       '    base="${image%%-boot*}"; rest="${image#"$base"}"\n'
-                      '    mv -- "$image" "${base}-${KSU_VARIANT}${rest}"\n'
+                      '    mv -- "$image" "${base}-${manager_name}${rest}"\n'
                       '  done\nfi\n' + capture['run'])
     job['steps'].insert(0, {'name': '设置组合构建文件名', 'if': "env.GKI_COMBINED_WORKER == 'true'",
-                           'run': 'echo "GKI_MANAGER_SUFFIX=-${KSU_VARIANT}" >> "$GITHUB_ENV"'})
+                           'run': 'echo "GKI_MANAGER_SUFFIX=-${KSU_VARIANT/SukiSU/SukiSU-Nova}" >> "$GITHUB_ENV"'})
     workflow['jobs']['publish-release']['env']['GKI_MANAGER_METADATA'] = RECEIPT
     return effective_inputs(workflow)
 

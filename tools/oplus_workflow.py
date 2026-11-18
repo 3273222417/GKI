@@ -16,7 +16,7 @@ DISPATCH = "github.event_name == 'workflow_dispatch'"
 KPM_IF = 'inputs.use_kpm'
 INPUTS = {
     'kernelsu_variant': {'description': 'KernelSU 变体', 'required': True, 'type': 'choice',
-                        'options': list(MANAGER_SELECTIONS), 'default': 'SukiSU'},
+                        'options': list(MANAGER_SELECTIONS), 'default': 'SukiSU-Nova'},
     'kernelsu_branch': {'description': '版本', 'required': True, 'type': 'choice',
                        'options': ['正式版', '最新版'], 'default': '最新版'},
     'build_target': {'description': '编译目标（可单独编译一个平台和内核）', 'required': True,
@@ -61,8 +61,9 @@ from oplus_catalog import strict_json
 from oplus_recipe import native_inputs
 profile = profile_identity(strict_json(os.environ['OPLUS_PROFILE'].encode()))
 inputs = strict_json(os.environ['OPLUS_INPUTS'].encode())
-from manager_variants import COMBINED_GROUPS
-selection = inputs.get('kernelsu_variant')
+from manager_variants import COMBINED_GROUPS, internal_manager_selection
+selection = internal_manager_selection(inputs.get('kernelsu_variant'))
+inputs['kernelsu_variant'] = selection
 if isinstance(selection, str) and selection in COMBINED_GROUPS:
     variant = os.environ.get('KSU_VARIANT')
     if os.environ.get('GKI_COMBINED_WORKER') != 'true' or variant not in COMBINED_GROUPS[selection]:

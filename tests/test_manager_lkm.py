@@ -250,6 +250,19 @@ class ManagerLkmTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaisesRegex(lkm.LkmError, 'formula changed'):
                 lkm.native_version_code(self.source, 3872)
 
+    def test_nova_native_offset_uses_the_operator_declared_by_its_source(self):
+        path = self.source / 'kernel/Kbuild'
+        baseline = path.read_text(encoding='utf-8').replace('40000', '30000')
+        stable = baseline.replace('2815', '4001')
+        path.write_text(stable, encoding='utf-8')
+        self.assertEqual(30000, lkm.native_version_code(self.source, 4001))
+        latest = baseline.replace('2815', '996').replace(' - $(VERSION_OFFSET)', ' + $(VERSION_OFFSET)')
+        path.write_text(latest, encoding='utf-8')
+        self.assertEqual(35004, lkm.native_version_code(self.source, 4008))
+        path.write_text(latest.replace('$(VERSION_OFFSET)),', '$(VERSION_OFFSET) + 1),'), encoding='utf-8')
+        with self.assertRaisesRegex(lkm.LkmError, 'formula changed'):
+            lkm.native_version_code(self.source, 4008)
+
     def test_official_eight_vermagics_include_generic_releases_and_match_image_locks(self):
         provenance = json.loads((ROOT / 'tests/fixtures/official-ddk-vermagic/provenance.json').read_text(encoding='utf-8'))
         self.assertEqual(len(provenance['modules']), 8)

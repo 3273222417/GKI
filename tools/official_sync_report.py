@@ -447,7 +447,7 @@ def render_update_highlights(report: dict) -> list[str]:
         channel = '、'.join(selected[key]) if key in selected else '、'.join(label.removeprefix('gki-') for label in item['channels'])
         topics = item.get('topics', []) if item['status'] == 'observed' else []
         text = '；'.join(topics) if topics else '更新内容未能归类，请查看官方对比'
-        lines.append('- ' + item['source'] + ' ' + channel + '：' + text + '。'
+        lines.append('- ' + ('SukiSU-Nova' if item['source'] == 'SukiSU' else item['source']) + ' ' + channel + '：' + text + '。'
                      ' [官方对比](' + compare_url(*key) + ')')
     return ['', '### 更新要点', '', *lines] if lines else []
 
@@ -492,6 +492,7 @@ def render_manager_versions(observations: dict) -> list[str]:
         lines.extend(['', '### 本次变化的管理器版本', '',
                       '| 管理器 | 类型 | 版本变化 |', '| --- | --- | --- |'])
         for (name, channel), before, after in changed:
+            name = 'SukiSU-Nova' if name == 'SukiSU' else name
             lines.append(f'| {name} | {channel} | {manager_version_label(before)} → {manager_version_label(after)} |')
     elif not unresolved:
         lines.extend(['', '本次无管理器正式版或测试版的版本变化。'])
@@ -625,7 +626,8 @@ def render_report(report: dict) -> str:
             changes = [item for item in report['source_changes'] if item['source'] == name]
             note = '（此前未记录，本次首次收录）' if all(item['kind'] == 'first-observation' for item in changes) else ''
             targets = ('：' + '、'.join(item['channel'].removeprefix('gki-') for item in changes)) if name == 'SUSFS' else ''
-            lines.append('- [' + name + '](' + source_url(name) + ')' + note + targets)
+            label = 'SukiSU-Nova' if name == 'SukiSU' else name
+            lines.append('- [' + label + '](' + source_url(name) + ')' + note + targets)
     else:
         lines.extend(['', '官方源码观察记录无变化。' if report['checks']['official'] == 'success'
                       else '官方源码检查未完成；沿用原记录。'])

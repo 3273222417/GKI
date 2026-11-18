@@ -57,7 +57,7 @@ jobs:
       run: python3 tools/manager_prebuild.py discover --previous "$RUNNER_TEMP/gki-manager-apk-observations.json" --artifact-history-branch
         "$DEFAULT_BRANCH"
   prebuild-manager-sources:
-    name: ${{ matrix.variant }} · ${{ matrix.channels }} · 固定 APK 源码与签名
+    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} · ${{ matrix.channels }} · 固定 APK 源码与签名
     runs-on: ubuntu-24.04
     if: needs.check-upstream.result == 'success' && needs.check-upstream.outputs.manager_prebuild_pending == 'true'
     env:
@@ -736,7 +736,7 @@ jobs:
       max-parallel: 6
       matrix: ${{ fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix) }}
   prebuild-manager-native:
-    name: ${{ matrix.variant }} 原生模块 / ${{ matrix.kmi }}
+    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 原生模块 / ${{ matrix.kmi }}
     needs:
     - check-upstream
     - prebuild-manager-sources
@@ -1055,7 +1055,7 @@ jobs:
         PY
       if: needs.prebuild-manager-sources.outputs[format('{0}_manager_adoption', matrix.slot)] == ''
   prebuild-manager-apks:
-    name: ${{ matrix.variant }} · ${{ matrix.channels }} · 预编译管理器 APK
+    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} · ${{ matrix.channels }} · 预编译管理器 APK
     if: always() && !cancelled() && needs.prebuild-manager-sources.result == 'success' && (needs.prebuild-manager-native.result
       == 'success' || needs.prebuild-manager-native.result == 'skipped')
     env:

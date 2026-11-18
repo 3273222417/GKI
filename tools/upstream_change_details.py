@@ -10,7 +10,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from manager_variants import MANAGERS, manager_profile
-from resolve_build_sources import github_repository_api
+from resolve_build_sources import github_repository_api, github_transport_repository
 
 SHA = re.compile(r'[0-9a-f]{40}\Z')
 SUSFS = 'simonpunk/susfs4ksu'
@@ -34,7 +34,7 @@ def source_url(source: str) -> str:
         return 'https://gitlab.com/' + SUSFS
     if source not in MANAGERS:
         raise DetailError('Unknown official source')
-    return 'https://github.com/' + manager_profile(source)['repository']
+    return 'https://github.com/' + github_transport_repository(manager_profile(source)['repository'])
 
 
 def compare_url(source: str, before: str, after: str) -> str:

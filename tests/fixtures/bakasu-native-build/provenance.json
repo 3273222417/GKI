@@ -8,5 +8,13 @@
     "kernel/tools/code_generation/syscall_no/syscall_no.mk": "5d65354bc6cc01fdb4c288ef69b5365e1b98cfe7619a8c942cbde99a3253b894",
     "kernel/tools/code_generation/syscall_no/syscall_no.c": "92b1ef09e02b6b0c069c7ab2ffe64ddc90943df39f2f5963b83a29fcc0365226",
     "kernel/tools/code_generation/preinit_runner/preinit_runner.mk": "3461eaa72bd7ca96933fae3797b7f6e828c127ea042118dbc43d902361dd5c65"
-  }
+  },
+  "revisions": [
+    {
+      "commit": "7b65bde0710b5e7c6f755545cb15a4abd417f3a8",
+      "file": "kernel/tools/code_generation/preinit_runner/preinit_runner.mk",
+      "fixture": "preinit_runner-7b65bde.mk.hex",
+      "sha256": "39c3781b4ad2186ad2c11425e5c67a27f484808131f3a941f5572f49a78931eb"
+    }
+  ]
 }

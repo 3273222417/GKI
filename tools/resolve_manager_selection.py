@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 
-from manager_variants import selected_managers
+from manager_variants import selected_managers, public_manager_selection
 from resolve_build_sources import (NoStableRelease, REPOSITORIES, SHA, TIERS, TIER_ALIASES,
                                    SourceResolutionError, resolve_sources, validate_ref)
 
@@ -128,9 +128,10 @@ def _outputs(values):
 
 def selection_summary(receipt):
     receipt = validate_receipt(receipt)
-    lines = ['### 本次管理器选择', '', '参与构建：' + ('、'.join(receipt['active_managers']) or '无') + '。']
+    lines = ['### 本次管理器选择', '', '参与构建：'
+             + ('、'.join(map(public_manager_selection, receipt['active_managers'])) or '无') + '。']
     for row in receipt['skipped_managers']:
-        lines.append('- 跳过 ' + row['variant'] + '：' + row['reason'] + '。')
+        lines.append('- 跳过 ' + public_manager_selection(row['variant']) + '：' + row['reason'] + '。')
     if not receipt['active_managers']:
         message = ('所选管理器的最新版均与正式版相同' if effective_tier(receipt['tier']) == 'Latest(最新)'
                    else '所选管理器暂无通过校验的正式版')
@@ -153,7 +154,7 @@ def main(argv=None):
                 raise ValueError('The requested manager was not selected for this build')
             source = receipt['sources'][args.source_for]
             _outputs(source)
-            print('Fixed official source: ' + args.source_for + '@' + source['ksu_ref'])
+            print('Fixed official source: ' + public_manager_selection(args.source_for) + '@' + source['ksu_ref'])
         else:
             receipt = resolve_selection(args.selection, args.tier, args.custom_ref, args.susfs == 'true')
             encoded = json.dumps(receipt, ensure_ascii=False, separators=(',', ':'))

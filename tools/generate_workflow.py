@@ -916,6 +916,7 @@ def generate(root):
                                (UPDATE_OUTPUT, updater_workflow()),
                                (REORDER_OUTPUT, reorder_release_workflow()),
                                (OPLUS_OUTPUT, oplus), (PREBUILD_OUTPUT, prebuild_workflow(single))):
+        public_workflow_names(document)
         content = header + yaml.dump(document, Dumper=Dumper, allow_unicode=True, sort_keys=False, width=120)
         if len(content.encode('utf-8')) > 500_000:
             raise ValueError('Generated workflow exceeds the GitHub workflow file size limit')
@@ -932,6 +933,22 @@ def generate(root):
             raise ValueError('Refusing a linked obsolete internal workflow')
         obsolete.unlink(missing_ok=True)
     return root / OUTPUT
+
+
+def public_workflow_names(value):
+    """Render current manager labels while build identities retain their recorded keys."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in ('name', 'description') and isinstance(child, str):
+                child = re.sub(r'\bSukiSU\b(?![-_])', 'SukiSU-Nova', child)
+                child = re.sub(r'\bmatrix\.variant\b',
+                               "(matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant)", child)
+                value[key] = child
+            else:
+                public_workflow_names(child)
+    elif isinstance(value, list):
+        for child in value:
+            public_workflow_names(child)
 
 
 def main():

@@ -599,7 +599,7 @@ job:
       python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
         https://github.com/WildKernels/kernel_patches.git kernel_patches
       python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
-        https://github.com/ShirkNeko/SukiSU_patch.git SukiSU_patch
+        https://github.com/SukiSU-Nova/SukiSU_patch.git SukiSU_patch
       echo "使用当前仓库补丁目录: $ZZH_PATCHES"
       python3 "$GITHUB_WORKSPACE/.github/scripts/cached-downloads.py" clone \
         https://github.com/Numbersf/Action-Build.git Action-Build --depth 1

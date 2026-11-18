@@ -10,15 +10,15 @@ run-name: 欧加真 · ${{ inputs.kernelsu_variant }} · ${{ inputs.kernelsu_bra
         required: true
         type: choice
         options:
-        - SukiSU
+        - SukiSU-Nova
         - BakaSU
         - KernelSU-Next
         - KernelSU
         - KowSU
         - FinaSU
-        - SukiSU + BakaSU + KernelSU-Next
+        - SukiSU-Nova + BakaSU + KernelSU-Next
         - KowSU + KernelSU + FinaSU
-        default: SukiSU
+        default: SukiSU-Nova
       kernelsu_branch:
         description: 版本
         required: true
@@ -122,15 +122,17 @@ jobs:
         python3 tools/resolve_manager_selection.py --selection "$MANAGER_SELECTION" --tier "$KSU_TIER" \
           --custom-ref "$CUSTOM_REF" --susfs "$ENABLE_SUSFS"
   prepare-matrix:
-    name: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant == 'KowSU + KernelSU
-      + FinaSU') && format('准备源码与构建目标 · {0}', matrix.variant) || '选择内核版本与补丁月份' }}
+    name: ${{ (inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next' || inputs.kernelsu_variant == 'KowSU + KernelSU
+      + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && format('准备源码与构建目标 · {0}', (matrix.variant
+      == 'SukiSU' && 'SukiSU-Nova' || matrix.variant)) || '选择内核版本与补丁月份' }}
     runs-on: ubuntu-24.04
     if: needs.select-managers.result == 'success' && needs.select-managers.outputs.active_count != '0' && (github.event_name
       == 'workflow_dispatch')
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     permissions:
       contents: read
       actions: write
@@ -610,7 +612,7 @@ jobs:
       matrix:
         variant: ${{ fromJSON(needs.select-managers.outputs.active_managers) }}
   build-sukisu-lkm:
-    name: ${{ matrix.variant }} 原生模块 / ${{ matrix.kmi }}
+    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 原生模块 / ${{ matrix.kmi }}
     needs:
     - select-managers
     - prepare-matrix
@@ -628,7 +630,8 @@ jobs:
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     timeout-minutes: 30
     defaults:
       run:
@@ -925,14 +928,15 @@ jobs:
         PY
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
   build-sukisu-manager:
-    name: 编译配套 ${{ matrix.variant }} 管理器 APK
+    name: 编译配套 ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 管理器 APK
     if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.select-managers.result == 'success'
       && needs.select-managers.outputs.active_count != '0' && (needs.build-sukisu-lkm.result == 'success' || needs.build-sukisu-lkm.result
       == 'skipped')
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     needs:
     - prepare-matrix
     - build-sukisu-lkm
@@ -2228,7 +2232,7 @@ jobs:
         variant: ${{ fromJSON(needs.select-managers.outputs.active_managers) }}
   build-oplus-kernel:
     name: ${{ matrix.platform == 'gki' && '通用 GKI' || startsWith(matrix.platform, 'mt') && '天玑' || '骁龙' }} · ${{ matrix.kernel
-      }} · ${{ matrix.variant }}
+      }} · ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }}
     if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.build-sukisu-manager.result == 'success'
     needs:
     - prepare-matrix
@@ -2257,7 +2261,8 @@ jobs:
       CCACHE_MAXSIZE: 3G
       GKI_MANAGER_METADATA: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_metadata', matrix.variant)] }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     steps: &id001
     - name: 检出独立构建工具
       uses: actions/checkout@v6
@@ -2282,8 +2287,9 @@ jobs:
         profile_fields.pop('variant')
         profile = profile_identity(profile_fields)
         inputs = strict_json(os.environ['OPLUS_INPUTS'].encode())
-        from manager_variants import COMBINED_GROUPS
-        selection = inputs.get('kernelsu_variant')
+        from manager_variants import COMBINED_GROUPS, internal_manager_selection
+        selection = internal_manager_selection(inputs.get('kernelsu_variant'))
+        inputs['kernelsu_variant'] = selection
         if isinstance(selection, str) and selection in COMBINED_GROUPS:
             variant = os.environ.get('KSU_VARIANT')
             if os.environ.get('GKI_COMBINED_WORKER') != 'true' or variant not in COMBINED_GROUPS[selection]:
@@ -2623,5 +2629,6 @@ jobs:
       CCACHE_MAXSIZE: 3G
       GKI_MANAGER_METADATA: ${{ needs.build-sukisu-manager.outputs[format('{0}_manager_metadata', matrix.variant)] }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
-        'KowSU + KernelSU + FinaSU') && 'true' || 'false' }}
+        'KowSU + KernelSU + FinaSU' || inputs.kernelsu_variant == 'SukiSU-Nova + BakaSU + KernelSU-Next') && 'true' || 'false'
+        }}
     steps: *id001

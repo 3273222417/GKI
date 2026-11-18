@@ -16,11 +16,11 @@
 | 项目 | 官方来源 | 可核实的许可记录 |
 | --- | --- | --- |
 | Android GKI 内核及 manifest | [kernel/common](https://android.googlesource.com/kernel/common)、[kernel/manifest](https://android.googlesource.com/kernel/manifest) | 按各官方仓库及文件中的 `COPYING`、`LICENSE`、SPDX 声明 |
-| SukiSU | [SukiSU-Ultra/SukiSU-Ultra](https://github.com/SukiSU-Ultra/SukiSU-Ultra) | 当前适配提交的根目录 `LICENSE` 为 GNU GPL v3，`kernel/LICENSE` 为 GNU GPL v2；其他文件按其自身声明 |
+| SukiSU-Nova | [SukiSU-Nova/SukiSU-Nova](https://github.com/SukiSU-Nova/SukiSU-Nova) | 当前适配提交的根目录 `LICENSE` 为 GNU GPL v3，`kernel/LICENSE` 为 GNU GPL v2；其他文件按其自身声明 |
 | BakaSU | [Baka-SU/BakaSU](https://github.com/Baka-SU/BakaSU) | 按每次固定源码提交中的许可文件与文件内声明 |
 | SUSFS | [simonpunk/susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) | 当前采用源码的 `LICENSE` 为 GNU GPL v3；保留具体文件的原有声明 |
 
-GKI 目录更新直接核对 Android 官方 Gitiles refs 与 Makefile，新增条目固定完整源码提交。SukiSU/SUSFS 官方更新检查只记录候选；实际构建采用的兼容配对记录在 `build-compatibility.json`。
+GKI 目录更新直接核对 Android 官方 Gitiles refs 与 Makefile，新增条目固定完整源码提交。SukiSU-Nova/SUSFS 官方更新检查记录候选；实际构建采用的兼容配对记录在 `build-compatibility.json`。
 
 ## 欧加真构建方法参考
 
@@ -49,11 +49,11 @@ GKI 目录更新直接核对 Android 官方 Gitiles refs 与 Makefile，新增�
 
 ## 构建依赖与 APK 内容
 
-构建还会按所选功能读取 [AnyKernel3](https://github.com/WildKernels/AnyKernel3)、[WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patches)、[ShirkNeko/SukiSU_patch](https://github.com/ShirkNeko/SukiSU_patch)、[Numbersf/Action-Build](https://github.com/Numbersf/Action-Build)、[Baseband Guard](https://github.com/vc-teahouse/Baseband-guard)、[Re-Kernel](https://github.com/Sakion-Team/Re-Kernel) 和 [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS) 等项目，以及 Android/LineageOS 构建工具链。这些依赖的许可说明应查阅实际检出版本中的许可文件与版权声明。
+构建还会按所选功能读取 [AnyKernel3](https://github.com/WildKernels/AnyKernel3)、[WildKernels/kernel_patches](https://github.com/WildKernels/kernel_patches)、[SukiSU-Nova/SukiSU_patch](https://github.com/SukiSU-Nova/SukiSU_patch)、[Numbersf/Action-Build](https://github.com/Numbersf/Action-Build)、[Baseband Guard](https://github.com/vc-teahouse/Baseband-guard)、[Re-Kernel](https://github.com/Sakion-Team/Re-Kernel) 和 [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS) 等项目，以及 Android/LineageOS 构建工具链。这些依赖的许可说明应查阅实际检出版本中的许可文件与版权声明。
 
-配套 ARM64 SukiSU APK 从选定的 SukiSU 提交编译管理器、JNI 与 `ksud`，该版本需要时同时编译 `ksuinit`。其 Rust、Android 和 Gradle 依赖由同一源码提交中的 `Cargo.lock`、`Cargo.toml`、`manager/gradle/libs.versions.toml` 等声明；本仓库未提交预编译的 `ksud`。
+配套 SukiSU-Nova APK 从选定的 SukiSU-Nova 提交编译管理器、JNI 与 `ksud`，该版本需要时同时编译 `ksuinit`。其 Rust、Android 和 Gradle 依赖由同一源码提交中的 `Cargo.lock`、`Cargo.toml`、`manager/gradle/libs.versions.toml` 等声明；本仓库未提交预编译的 `ksud`。
 
-早期 SukiSU 配套 APK 使用包名 `com.cyzrqh.gki.sukisu`。后续构建保留上游的实际应用 ID：SukiSU 为 `com.sukisu.ultra`，BakaSU 为 `com.resukisu.resukisu`；它们仍由本仓库固定密钥签名，采用相同包名不代表采用上游作者的官方签名。源码提交与实际包信息随构建元数据记录，公开 Release 不包含签名私钥或密码。
+当前 SukiSU-Nova 构建使用上游应用 ID `com.sukisu.nova`，BakaSU 使用 `com.resukisu.resukisu`。历史 SukiSU Ultra 的包名为 `com.sukisu.ultra`，早期配套 APK 曾使用 `com.cyzrqh.gki.sukisu`。配套安装包由本仓库固定密钥签名，源码提交与实际包信息随构建元数据记录。
 
 ## 历史署名
 
