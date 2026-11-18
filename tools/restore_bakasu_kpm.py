@@ -512,10 +512,12 @@ def verify_bakasu_kpm_port(source: Path, reference: str, *, scope=None) -> dict:
     selected_after = {name: data for name, data in after.items()
                       if any(name == prefix or name.startswith(prefix + '/') for prefix in selected_scope)}
     selected_before = {name: before[name] for name in selected_after}
-    with temporary_directory(source.parent, '.bakasu-kpm-reverse-') as scratch:
-        prepared = scratch / 'reviewed.patch'
-        prepared.write_bytes(materialized_patch(selected_before, selected_after))
-        git(source, 'apply', '--reverse', '--check', str(prepared))
+    reverse = materialized_patch(selected_before, selected_after)
+    if reverse:
+        with temporary_directory(source.parent, '.bakasu-kpm-reverse-') as scratch:
+            prepared = scratch / 'reviewed.patch'
+            prepared.write_bytes(reverse)
+            git(source, 'apply', '--reverse', '--check', str(prepared))
     return expected
 
 
