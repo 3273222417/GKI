@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 import re
 
 from additional_susfs24 import policy_hooks
-from apply_susfs23 import PATCH_PATH, apply_reviewed_port, verify_integration
+from apply_susfs23 import PATCH_PATH, apply_reviewed_port, git as source_git, verify_integration
 from ensure_susfs_headers import without_comments
 from ensure_susfs_priority import CONFIG as PRIORITY_CONFIG, OPTION, priority_api
 from validate_susfs_hooks import inspect_c_source, strip_comments_and_literals
@@ -21,6 +22,25 @@ config {PREINIT}
 \tdepends on KSU_SUSFS
 \tdefault y
 '''
+NATIVE_QUERY = 'KSU_SUSFS_NATIVE_SELINUX_QUERY'
+NATIVE_QUERY_CONFIG = f'''
+config {NATIVE_QUERY}
+\tbool
+\tdepends on KSU=y && KSU_SUSFS
+\tdefault y
+'''
+# Full C token identities of the existing native implementations, after the
+# reviewed direct-hook port. These two protocol contracts lock permission
+# failures, backup-policy calls, output format and return lengths together.
+# A changed upstream callback must fail the normal sync preflight for review;
+# its policy helpers remain source-bound without a version/hash whitelist.
+# Observed callback contracts: Ultra 645ef986 and Nova c60f21b9.
+NATIVE_QUERY_IDENTITIES = {
+    'my_write_context': {'2ee611ac5640692fa0550f139dde572eb785d32884e12f0387e57f129d3a34e4'},
+    'my_write_access': {'45d4d7a3b1810d8613ebf133f8d13f99abb8c2e94facc89903577c5f935e0ff5'},
+}
+NATIVE_QUERY_HELPERS = ('security_context_to_sid_with_policy', 'security_sid_to_context_with_policy',
+                        'security_compute_av_user_with_policy')
 GUARD = f'#ifdef CONFIG_{OPTION}\n'
 END_GUARD = f'#endif // CONFIG_{OPTION}\n'
 SETTER = 'susfs_set_priority_uid_filter'
@@ -174,14 +194,96 @@ def native_preinit(source: Path, variant: str) -> bool:
     raise ValueError('SukiSU SUSFS v2.4.0 requires the reviewed native preinit providers')
 
 
-def configure(text: str, modern: bool) -> str:
+def query_tokens(text: str) -> tuple[str, ...]:
+    return tuple(re.findall(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z_]\w*|[0-9][A-Za-z_0-9.]*|\S',
+                            without_comments(text)))
+
+
+def query_implementation(text: str, symbol: str, *, is_static: bool) -> str:
+    """Extract exactly one real, unconditional function and its declarator."""
+    code = strip_comments_and_literals(text)
+    clean = without_comments(text)
+    _, definitions = inspect_c_source(Path(HIDE), text, symbols=(symbol,))
+    found = [item for item in definitions if item.symbol == symbol]
+    signature = (r'(?m)^' + (r'static\s+' if is_static else '')
+                 + (r'ssize_t\s+' if symbol.startswith('my_write_') else r'(?:int|void)\s+(?:__nocfi\s+)?')
+                 + re.escape(symbol) + r'\s*\([^;{}]*\)\s*\{')
+    matches = list(re.finditer(signature, code))
+    if len(found) != 1 or found[0].is_static != is_static or len(matches) != 1:
+        raise ValueError('Missing real native SELinux query provider: ' + symbol)
+    match = matches[0]
+    depth = 0
+    for directive in re.findall(r'(?m)^\s*#\s*(if|ifdef|ifndef|endif)\b', clean[:match.start()]):
+        depth += -1 if directive == 'endif' else 1
+        if depth < 0:
+            raise ValueError('Unbalanced native SELinux query preprocessor guards')
+    if depth:
+        raise ValueError('Native SELinux query provider must be unconditional: ' + symbol)
+    end, braces = match.end(), 1
+    while end < len(code) and braces:
+        braces += (code[end] == '{') - (code[end] == '}')
+        end += 1
+    implementation = text[match.start():end]
+    if braces or re.search(r'(?m)^\s*#', without_comments(implementation)):
+        raise ValueError('Review the native SELinux query body: ' + symbol)
+    return implementation
+
+
+def verify_native_selinux_query(source: Path, text: str) -> None:
+    """Preserve selected-HEAD query logic and prove its reviewed direct ABI."""
+    code = strip_comments_and_literals(text)
+    clean = without_comments(text)
+    native = source_git(source, 'show', 'HEAD:' + HIDE)
+    if native.returncode:
+        raise ValueError('Cannot bind native SELinux queries to the selected manager source')
+    if not re.search(r'(?m)^kernelsu-objs\s*\+=\s*feature/selinux_hide\.o\s*$',
+                     read(source, 'kernel/Kbuild')):
+        raise ValueError('Native SELinux query providers must be linked in Kbuild')
+    if re.search(r'\borig_(?:context|access)_write\b', code):
+        raise ValueError('Native SELinux queries must not retain the legacy orig_* detour')
+    permission_macros = re.findall(r'(?m)^\s*#\s*define\s+ksu_avc_has_perm_compat\([^\n]*', clean)
+    if [re.sub(r'\s+', '', item) for item in permission_macros] != [
+            '#defineksu_avc_has_perm_compat(...)avc_has_perm(__VA_ARGS__)',
+            '#defineksu_avc_has_perm_compat(...)avc_has_perm(&selinux_state,__VA_ARGS__)']:
+        raise ValueError('Native SELinux queries require their real AVC permission helper')
+    protected = tuple(NATIVE_QUERY_IDENTITIES) + NATIVE_QUERY_HELPERS + ('backup_sepolicy',)
+    if re.search(r'(?m)^\s*#\s*(?:define|undef)\s+(?:' + '|'.join(protected) + r')\b', clean):
+        raise ValueError('Native SELinux query providers must not be replaced by macros')
+    for symbol in protected[:-1]:
+        callback = symbol in NATIVE_QUERY_IDENTITIES
+        implementation = query_implementation(text, symbol, is_static=not callback)
+        original = query_implementation(native.stdout, symbol, is_static=True)
+        if callback:
+            # The reviewed port makes the callback global and removes only
+            # the module detour. App-UID/hide-running gates live in selinuxfs.
+            original = re.sub(r'^static\s+', '', without_comments(original), count=1)
+            kind = 'context' if symbol == 'my_write_context' else 'access'
+            detour = (r'\s*if\s*\(likely\(current_uid\(\)\.val\s*<\s*10000\)\)\s*\{\s*'
+                      r'return\s+orig_' + kind + r'_write\(file,\s*buf,\s*size\);\s*\}')
+            original, count = re.subn(detour, '', original)
+            if count != 1:
+                raise ValueError('Review the selected native SELinux query detour: ' + symbol)
+        if query_tokens(implementation) != query_tokens(original):
+            raise ValueError('Native SELinux query differs from selected HEAD: ' + symbol)
+        identity = hashlib.sha256('\0'.join(query_tokens(implementation)).encode()).hexdigest()
+        if callback and identity not in NATIVE_QUERY_IDENTITIES[symbol]:
+            raise ValueError('Review the native SELinux query permissions, backup policy and return protocol: ' + symbol)
+
+
+def configure(text: str, modern: bool, *, native_query: bool = False) -> str:
     if len(re.findall(r'(?m)^config KSU_SUSFS\s*$', text)) != 1:
         raise ValueError('SUSFS integration requires the native KSU_SUSFS configuration')
-    for name, definition, enabled in ((OPTION, PRIORITY_CONFIG, True), (PREINIT, PREINIT_CONFIG, modern)):
+    for name, definition, enabled in ((OPTION, PRIORITY_CONFIG, True), (PREINIT, PREINIT_CONFIG, modern),
+                                      (NATIVE_QUERY, NATIVE_QUERY_CONFIG, native_query)):
         count = len(re.findall(r'(?m)^config ' + name + r'\s*$', text))
         if count:
             if not enabled or count != 1 or definition.strip() not in text:
                 raise ValueError('Review the existing SUSFS configuration for ' + name)
+            if name == NATIVE_QUERY:
+                block = re.search(r'(?ms)^config ' + name + r'\n.*?(?=^(?:config|menuconfig|menu|endmenu|'
+                                  r'if|endif|choice|endchoice|comment)\b|\Z)', text)
+                if block is None or block[0].strip() != definition.strip():
+                    raise ValueError('Native SELinux query capability requires its exact hidden builtin-only configuration')
         elif enabled:
             text = text.rstrip() + '\n' + definition
     return text
@@ -245,7 +347,6 @@ def integrate(source: Path, dependency: Path, variant: str) -> tuple[Path, ...]:
     updated = {
         DISPATCH: dispatch_with_priority(source, original[DISPATCH], variant),
         OBSERVER: observer_with_priority(original[OBSERVER], variant),
-        KCONFIG: configure(original[KCONFIG], native_preinit(source, variant)),
         POLICY: policy_hooks(original[POLICY], baka_layout=variant == 'BakaSU'),
     }
     if variant == 'SukiSU':
@@ -257,6 +358,8 @@ def integrate(source: Path, dependency: Path, variant: str) -> tuple[Path, ...]:
         updated[RUNTIME] = remove_unlinked_input_work(original[RUNTIME])
         original[HIDE] = read(source, HIDE)
         updated[HIDE] = restore_selinux_lifecycle_boundary(original[HIDE])
+        verify_native_selinux_query(source, updated[HIDE])
+    updated[KCONFIG] = configure(original[KCONFIG], native_preinit(source, variant), native_query=variant == 'SukiSU')
     changed = []
     for relative, text in updated.items():
         if text != original[relative]:

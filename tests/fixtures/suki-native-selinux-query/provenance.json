@@ -1,0 +1,17 @@
+{
+  "description": "Unmodified native callback/helper excerpts. Tests apply only the reviewed direct-port global visibility and orig detour removals.",
+  "sources": [
+    {
+      "repository": "SukiSU-Ultra/SukiSU-Ultra",
+      "ref": "645ef9860b9b7f900bb5d1b27e224f2c311d39c0",
+      "path": "kernel/feature/selinux_hide.c",
+      "source_sha256": "b7a6d74a64d49a11552a10595f284d2340d36d55defcf49f0ccdc9f5896c9ee2"
+    },
+    {
+      "repository": "SukiSU-Nova/SukiSU-Nova",
+      "ref": "c60f21b9e00e35e898f8d21e0612465b76b9beec",
+      "path": "kernel/feature/selinux_hide.c",
+      "source_sha256": "30de2610ada01233cd9ab4521716416951be623e710863e8c9bdcbd9e6e69dfb"
+    }
+  ]
+}

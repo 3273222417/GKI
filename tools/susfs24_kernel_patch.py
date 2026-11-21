@@ -44,6 +44,14 @@ OPTIONAL_CONTEXT = {
 SECTION = re.compile(r'(?m)^diff --git a/([a-zA-Z0-9_./-]+) b/\1\n')
 HUNK = re.compile(r'(?m)^@@ -(\d+),(\d+) \+(\d+),(\d+) @@([^\n]*)\n')
 POLICY_SERVICES = 'security/selinux/ss/services.c'
+SELINUX_FS = 'security/selinux/selinuxfs.c'
+NATIVE_SELINUX_QUERY = 'KSU_SUSFS_NATIVE_SELINUX_QUERY'
+NATIVE_QUERY_HEADER = ('#ifdef CONFIG_KSU_SUSFS\n'
+                       'extern struct page *fake_status;\n'
+                       'extern struct static_key_false fake_status_initialize_key;\n'
+                       'extern bool ksu_selinux_hide_running __read_mostly;\n')
+NATIVE_QUERY_DECLARATIONS = ('extern ssize_t my_write_context(struct file *file, char *buf, size_t size);\n'
+                             'extern ssize_t my_write_access(struct file *file, char *buf, size_t size);\n')
 POLICY_ARGS = 'struct policydb *policydb, struct context *scontext, struct context *tcontext, u16 tclass'
 LEGACY_POLICY = (
     ('security_dump_masked_av', 'u32 permissions, const char *reason', 'permissions, reason'),
@@ -162,6 +170,52 @@ def restore_legacy_policy_services(common: Path, manager: Path) -> None:
     path.write_bytes(updated.encode('utf-8'))
 
 
+def bridge_native_selinux_queries(text: str) -> str:
+    """Keep SukiSU's existing snapshot queries behind its own Kconfig flag.
+
+    The real policy, AVC generation, and ordinary system callers retain the
+    official Linux/SUSFS implementation. Only the already-enabled app query
+    view can select callbacks exported by the reviewed manager-side port.
+    """
+    code = strip_comments_and_literals(text)
+    if (text.count(NATIVE_QUERY_HEADER) != 1
+            or re.search(r'\b(?:my_write_context|my_write_access|' + NATIVE_SELINUX_QUERY + r')\b', code)):
+        raise ValueError('Review changed official SUSFS SELinux query declarations')
+    preserved = {name: function_text(text, name) for name in (
+        'sel_write_context', 'sel_write_access', 'susfs_sel_write_context', 'susfs_sel_write_access')}
+    replacements = []
+    for kind in ('context', 'access'):
+        name = 'handle_sel_write_' + kind
+        original = function_text(text, name)
+        expected = (f'static ssize_t {name}(struct file *file, char *buf, size_t size)\n{{\n'
+                    '\tif ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running)))\n'
+                    f'\t\treturn susfs_sel_write_{kind}(file, buf, size);\n'
+                    f'\treturn sel_write_{kind}(file, buf, size);\n}}')
+        if ' '.join(original.split()) != ' '.join(expected.split()) or text.count(original) != 1:
+            raise ValueError('Review changed official SUSFS SELinux query gate: ' + name)
+        updated = (f'static ssize_t {name}(struct file *file, char *buf, size_t size)\n{{\n'
+                   '\tif ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running))) {\n'
+                   f'\t\tif (IS_ENABLED(CONFIG_{NATIVE_SELINUX_QUERY}))\n'
+                   f'\t\t\treturn my_write_{kind}(file, buf, size);\n'
+                   f'\t\treturn susfs_sel_write_{kind}(file, buf, size);\n'
+                   '\t}\n'
+                   f'\treturn sel_write_{kind}(file, buf, size);\n}}')
+        replacements.append((original, updated))
+    # Build and verify the complete result before returning the first change.
+    updated = text.replace(NATIVE_QUERY_HEADER, NATIVE_QUERY_HEADER + NATIVE_QUERY_DECLARATIONS, 1)
+    for before, after in replacements:
+        updated = updated.replace(before, after, 1)
+    if any(function_text(updated, name) != native for name, native in preserved.items()):
+        raise ValueError('Native SELinux query providers must remain unchanged')
+    return updated
+
+
+def restore_native_selinux_queries(common: Path) -> None:
+    path = source_path(common, SELINUX_FS)
+    original = path.read_bytes().decode('utf-8')
+    path.write_bytes(bridge_native_selinux_queries(original).encode('utf-8'))
+
+
 def apply_susfs24(kernel_root: Path, susfs_dir: Path, target: str, *,
                   apply_patch: Callable[[Path, Path], None] | None = None) -> None:
     if target not in TARGETS or kernel_root.is_symlink() or susfs_dir.is_symlink():
@@ -210,6 +264,7 @@ def apply_susfs24(kernel_root: Path, susfs_dir: Path, target: str, *,
         staged_patch = temporary / patch_name
         staged_patch.write_bytes(''.join(sections.values()).encode('utf-8'))
         apply_patch(stage, staged_patch)
+        restore_native_selinux_queries(stage)
         if target in ('android15-6.6', 'android16-6.12'):
             restore_legacy_policy_services(stage, kernel_root.parent / 'KernelSU')
         if target in LEGACY_FDINFO:
