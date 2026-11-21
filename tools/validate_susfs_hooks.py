@@ -42,6 +42,7 @@ PREINIT_GUARD = '#ifdef CONFIG_KSU_SUSFS_NATIVE_PREINIT'
 PREINIT_BLOCK = re.compile(r'(?m)^' + PREINIT_GUARD + r'[ \t]*\n'
                           r'(?:(?![ \t]*#)[^\n]*\n)*'
                           r'^#endif // ' + PREINIT_GUARD + r'[ \t]*$')
+NATIVE_QUERY_CAPABILITY = 'KSU_SUSFS_NATIVE_SELINUX_QUERY'
 
 
 @dataclass(frozen=True)
@@ -315,6 +316,43 @@ def bakasu_setprocattr_alias(source: Path, ksu: Path) -> Definition | None:
     return None
 
 
+def inactive_native_query_calls(source: str) -> str:
+    """Mask only the reviewed builtin bridge when its Kconfig is absent.
+
+    This is deliberately not a general C/preprocessor evaluator. The Linux
+    bridge emitted by susfs24_kernel_patch keeps these callback references in
+    an IS_ENABLED(false) branch for managers that have no such capability.
+    Exact handler matching leaves all other hook calls subject to validation.
+    """
+    if re.search(r'(?m)^\s*#\s*(?:define|undef)\s+(?:IS_ENABLED|CONFIG_'
+                 + NATIVE_QUERY_CAPABILITY + r'(?:_MODULE)?)\b', source):
+        return source
+    code = strip_comments_and_literals(source)
+    ranges = []
+    for kind in ('context', 'access'):
+        name = 'handle_sel_write_' + kind
+        branch = (f'\t\tif (IS_ENABLED(CONFIG_{NATIVE_QUERY_CAPABILITY}))\n'
+                  f'\t\t\treturn my_write_{kind}(file, buf, size);\n')
+        handler = (f'static ssize_t {name}(struct file *file, char *buf, size_t size)\n{{\n'
+                   '\tif ((likely(current_uid().val >= 10000 && ksu_selinux_hide_running))) {\n'
+                   + branch
+                   + f'\t\treturn susfs_sel_write_{kind}(file, buf, size);\n'
+                   '\t}\n'
+                   f'\treturn sel_write_{kind}(file, buf, size);\n}}')
+        definitions = re.findall(r'(?m)^static[ \t]+ssize_t[ \t]+' + name + r'\s*\([^;{}]*\)\s*\{', code)
+        if code.count(handler) != 1 or len(definitions) != 1:
+            continue
+        start = code.index(handler) + handler.index(branch)
+        ranges.append((start, start + len(branch)))
+    # Preserve offsets as well as line numbers for all remaining diagnostics.
+    result = list(source)
+    for start, end in ranges:
+        for index in range(start, end):
+            if result[index] not in '\r\n':
+                result[index] = ' '
+    return ''.join(result)
+
+
 def validate_hooks(kernel_root: Path, ksu_dir: Path | None = None, *, variant: str = 'SukiSU') -> ValidationResult:
     """Validate current source bytes without modifying, executing or importing them."""
     if variant not in MANAGERS:
@@ -325,9 +363,12 @@ def validate_hooks(kernel_root: Path, ksu_dir: Path | None = None, *, variant: s
     source = (root / "common").resolve() if (root / "common").is_dir() else root
     ksu = resolve_ksu_dir(root, Path(ksu_dir) if ksu_dir is not None else None)
     kconfig = ksu / 'Kconfig' if ksu is not None else None
-    old_preinit = (kconfig is not None and kconfig.is_file()
-                   and re.search(r'(?m)^config KSU_SUSFS_NATIVE_PREINIT\s*$',
-                                 kconfig.read_text(encoding='utf-8')) is None)
+    kconfig_text = kconfig.read_text(encoding='utf-8') if kconfig is not None and kconfig.is_file() else None
+    old_preinit = (kconfig_text is not None
+                   and re.search(r'(?m)^config KSU_SUSFS_NATIVE_PREINIT\s*$', kconfig_text) is None)
+    absent_native_query = (kconfig_text is not None
+                           and re.search(r'(?m)^[ \t]*(?:config|menuconfig)[ \t]+'
+                                         + NATIVE_QUERY_CAPABILITY + r'(?:\s|$)', kconfig_text) is None)
     calls: dict[str, list[Location]] = {}
     definitions: list[Definition] = []
     for path in _c_files(source, (ksu,) if ksu is not None else ()):
@@ -336,6 +377,8 @@ def validate_hooks(kernel_root: Path, ksu_dir: Path | None = None, *, variant: s
             # The verified 2.4 port emits this guard around only the two
             # newer preinit calls. Leave all active legacy calls visible.
             text = PREINIT_BLOCK.sub(lambda match: '\n' * match[0].count('\n'), text)
+        if absent_native_query and path == source / 'security/selinux/selinuxfs.c':
+            text = inactive_native_query_calls(text)
         if not any(symbol in text for symbol in DIRECT_HOOKS):
             continue
         file_calls, file_definitions = inspect_c_source(path, text, symbols=DIRECT_HOOKS)
