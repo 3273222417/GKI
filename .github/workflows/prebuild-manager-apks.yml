@@ -15,6 +15,44 @@ name: 自动预编译管理器 APK
     paths:
     - .github/workflows/prebuild-manager-apks.yml
     - config/validated-manager-builds.json
+    - config/bakasu-kpm-port.json
+    - config/manager-ddk-images.json
+    - tools/additional_manager_jobs.py
+    - tools/additional_manager_kpm.py
+    - tools/additional_manager_kpm_ui.py
+    - tools/apk_manifest.py
+    - tools/build_additional_manager.sh
+    - tools/build_bakasu_manager.sh
+    - tools/build_fina_manager.py
+    - tools/build_manager_extras.sh
+    - tools/build_manager_extras_container.sh
+    - tools/build_manager_native.sh
+    - tools/build_sukisu_builtzygisk.sh
+    - tools/build_sukisu_manager.sh
+    - tools/checkout_ksu_snapshot.py
+    - tools/configure_bakasu_kpm_ui.py
+    - tools/configure_bakasu_manager_notice.py
+    - tools/configure_sukisu_kpm_ui.py
+    - tools/embedded_build_metadata.py
+    - tools/generate_workflow.py
+    - tools/kpm_theme.py
+    - tools/manager_full_native.py
+    - tools/manager_lkm_jobs.py
+    - tools/manager_ui_defaults.py
+    - tools/manager_variants.py
+    - tools/patches/bakasu-kpm.patch
+    - tools/prepare_additional_gradle.py
+    - tools/prepare_manager_icons.py
+    - tools/prepare_manager_lkm.py
+    - tools/restore_bakasu_kpm.py
+    - tools/reusable_manager_apk.py
+    - tools/repack_manager_release.py
+    - tools/sign_sukisu_manager.py
+    - tools/snapshot_ksu_source.py
+    - tools/sukisu_cargo_lock.py
+    - tools/verify_manager_boot_patch.py
+    - tools/patches/bakasu-kpm-base/*.source
+    - tools/templates/*.kt
 permissions:
   contents: read
   actions: write

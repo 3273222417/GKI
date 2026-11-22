@@ -193,9 +193,19 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertNotIn('prebuild-managers', updater['jobs'])
         self.assertEqual(updater['on']['schedule'], [{'cron': '0 4,16 * * *'}])
         workflow = prebuild_workflow(create_workflow(ROOT))
-        self.assertEqual(workflow['on'], {'workflow_run': {'workflows': [updater['name']],
-                                         'types': ['completed'], 'branches': ['main']},
-                                         'push': {'branches': ['main'], 'paths': [OUTPUT, APPROVED_PATH]}})
+        self.assertEqual(set(workflow['on']), {'workflow_run', 'push'})
+        self.assertEqual(workflow['on']['workflow_run'], {'workflows': [updater['name']],
+                                                        'types': ['completed'], 'branches': ['main']})
+        self.assertEqual(workflow['on']['push']['branches'], ['main'])
+        paths = workflow['on']['push']['paths']
+        self.assertEqual(paths[:2], [OUTPUT, APPROVED_PATH])
+        self.assertEqual(len(paths), len(set(paths)))
+        # A recipe change invalidates signed APK reuse, so it must also ask
+        # the existing automatic workflow to build the replacement.
+        from reusable_manager_apk import RECIPE_INPUTS, RECIPE_PATTERNS
+        self.assertTrue(set(RECIPE_INPUTS).issubset(paths))
+        self.assertTrue(set(RECIPE_PATTERNS).issubset(paths))
+        self.assertIn('tools/build_fina_manager.py', paths)
         discovery = workflow['jobs']['check-upstream']
         self.assertIn(f"github.event.workflow_run.path == '{UPDATER_PATH}'", discovery['if'])
         self.assertIn('github.event.workflow_run.head_repository.full_name == github.repository', discovery['if'])

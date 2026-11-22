@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from manager_prebuild import STATE_ARTIFACT
+from reusable_manager_apk import RECIPE_INPUTS, RECIPE_PATTERNS
 
 
 OUTPUT = '.github/workflows/prebuild-manager-apks.yml'
@@ -73,7 +74,8 @@ def prebuild_workflow(base: dict) -> dict:
     }
     return {'name': '自动预编译管理器 APK',
             'on': {'workflow_run': {'workflows': [UPDATER_NAME], 'types': ['completed'], 'branches': ['main']},
-                   'push': {'branches': ['main'], 'paths': [OUTPUT, 'config/validated-manager-builds.json']}},
+                   'push': {'branches': ['main'], 'paths': list(dict.fromkeys(
+                       [OUTPUT, 'config/validated-manager-builds.json', *RECIPE_INPUTS, *RECIPE_PATTERNS]))}},
             'permissions': {'contents': 'read', 'actions': 'write'},
             'concurrency': {'group': 'gki-official-manager-apk-prebuild', 'cancel-in-progress': False},
             'jobs': {'check-upstream': discovery, **create_jobs(base), 'record-manager-prebuild': record_job()}}
