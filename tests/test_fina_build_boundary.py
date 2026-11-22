@@ -37,7 +37,7 @@ class FinaBuildBoundaryTests(unittest.TestCase):
                     self.assertions()
                     return self
                 def assertions(self):
-                    self_test.assertEqual(['nomount', 'sui', 'apk'], self.args[2:])
+                    self_test.assertEqual(['nomount'], self.args[2:])
                     env = self.options['env']
                     self_test.assertNotIn('SUKISU_APK_KEYSTORE', env)
                     self_test.assertNotIn('SUKISU_APK_PASSWORD', env)

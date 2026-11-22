@@ -1,0 +1,35 @@
+# Actual Sui failure: cyzrqh/GKI run45021873964 job137208692569
+# FinaSU v1.6.5 source f96445f966a2c3f4c1257938acf0449757be8a04
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+A problem occurred configuring project ':buildSrc'.
+> Could not resolve all artifacts for configuration 'classpath'.
+   > Could not resolve org.jetbrains.kotlin:kotlin-stdlib:2.4.10.
+     Required by:
+         buildscript of project ':buildSrc'
+         buildscript of project ':buildSrc' > org.gradle.kotlin.kotlin-dsl:org.gradle.kotlin.kotlin-dsl.gradle.plugin:6.7.6 > org.gradle.kotlin:gradle-kotlin-dsl-plugins:6.7.6
+      > Repository Gradle Central Plugin Repository is disabled due to earlier error below:
+         > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugin-api:2.4.10.
+            > Could not get resource 'https://plugins.gradle.org/m2/org/jetbrains/kotlin/kotlin-gradle-plugin-api/2.4.10/kotlin-gradle-plugin-api-2.4.10.pom'.
+               > Could not GET 'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugin-api/2.4.10/kotlin-gradle-plugin-api-2.4.10.pom'.
+                  > Received status code 429 from server: Too Many Requests
+   > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10.
+     Required by:
+         buildscript of project ':buildSrc' > org.gradle.kotlin.kotlin-dsl:org.gradle.kotlin.kotlin-dsl.gradle.plugin:6.7.6 > org.gradle.kotlin:gradle-kotlin-dsl-plugins:6.7.6
+      > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10.
+         > Could not parse POM https://plugins.gradle.org/m2/org/jetbrains/kotlin/kotlin-gradle-plugin/2.4.10/kotlin-gradle-plugin-2.4.10.pom
+            > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugins-bom:2.4.10.
+               > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugins-bom:2.4.10.
+                  > Could not get resource 'https://plugins.gradle.org/m2/org/jetbrains/kotlin/kotlin-gradle-plugins-bom/2.4.10/kotlin-gradle-plugins-bom-2.4.10.pom'.
+                     > Could not GET 'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugins-bom/2.4.10/kotlin-gradle-plugins-bom-2.4.10.pom'.
+                        > Received status code 429 from server: Too Many Requests
+> There are 3 more failures with identical causes.
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 29s

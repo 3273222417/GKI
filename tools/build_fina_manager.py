@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import time
 import zipfile
 
 from apk_manifest import manifest_identity
@@ -23,6 +25,54 @@ from manager_full_native import official_abis, verify_apk
 from snapshot_ksu_source import git
 
 BUILD_ALIAS = 'gki-fina-build-only'
+GRADLE_RETRY_DELAYS = (30, 60)
+DEPENDENCY_HOSTS = (r'(?:repo\.maven\.apache\.org|repo1\.maven\.org|plugins\.gradle\.org|'
+                    r'dl\.google\.com|maven\.google\.com)')
+
+
+def transient_gradle_download(output: str) -> bool:
+    """Only retry an explicit temporary dependency error in this failure block."""
+    text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', output)
+    sections = text.split('* What went wrong:')
+    # Multiple exceptions can mix a download outage with a real build error.
+    if len(sections) != 2:
+        return False
+    failure = sections[1].split('* Try:', 1)[0]
+    if not re.search(r'Could not (?:resolve|download)\b', failure):
+        return False
+    if re.search(r'(?im)\b(?:checksum|verification failed|PKIX|certificate|keystore|signing|'
+                 r'compilation (?:error|failed)|unresolved reference|cannot find symbol)\b|'
+                 r'^\s*(?:e:|error:)', failure):
+        return False
+    codes = re.findall(r'Received status code ([0-9]{3}) from server', failure)
+    if not codes or any(code not in ('408', '429', '500', '502', '503', '504') for code in codes):
+        return False
+    return bool(re.search(r'Could not (?:GET|HEAD) [\'\"]https://' + DEPENDENCY_HOSTS
+                          + r'/[^\'\"\r\n]+[\'\"][^\r\n]*\r?\n[^\r\n]*'
+                            r'Received status code (?:408|429|500|502|503|504) from server', failure))
+
+
+def run_stage(arguments: list[str], source: Path, environment: dict, password: str,
+              *, retry_gradle: bool = False) -> None:
+    """Keep a successful stage intact; retry only its transient Gradle fetch."""
+    for attempt in range(len(GRADLE_RETRY_DELAYS) + 1):
+        tail = deque(maxlen=128)
+        with subprocess.Popen(arguments, cwd=source, env=environment, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace') as process:
+            for line in process.stdout:
+                safe = redact(line.rstrip(), (password,))
+                print(safe, flush=True)
+                tail.append(safe[-4096:])
+            status = process.wait()
+        if status == 0:
+            return
+        if (not retry_gradle or attempt == len(GRADLE_RETRY_DELAYS)
+                or not transient_gradle_download('\n'.join(tail))):
+            raise ValueError('FinaSU canonical native build/packaging failed')
+        delay = GRADLE_RETRY_DELAYS[attempt]
+        print(f'FinaSU Gradle dependency download temporarily unavailable; retrying the same stage '
+              f'in {delay}s ({attempt + 2}/3)', flush=True)
+        time.sleep(delay)
 
 
 def payload_steps(source: Path) -> list[str]:
@@ -79,18 +129,13 @@ def build(source: Path, output: Path):
         environment['KEYSTORE_PROPS'] = str(properties)
         # Paired, certificate-checked KernelSU LKMs are staged by the existing
         # eight-KMI job. Preserve them; build the remaining native dependencies.
-        commands = [
-            ['bash', 'build.sh', *payload_steps(source)],
-            ['bash', str(Path(__file__).with_name('build_manager_native.sh')), str(source)],
-            ['bash', 'build.sh', 'repack'],
+        commands = [(['bash', 'build.sh', step], step in ('sui', 'apk'))
+                    for step in payload_steps(source)] + [
+            (['bash', str(Path(__file__).with_name('build_manager_native.sh')), str(source)], False),
+            (['bash', 'build.sh', 'repack'], False),
         ]
-        for arguments in commands:
-            with subprocess.Popen(arguments, cwd=source, env=environment, stdout=subprocess.PIPE,
-                                  stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace') as process:
-                for line in process.stdout:
-                    print(redact(line.rstrip(), (password,)), flush=True)
-                if process.wait():
-                    raise ValueError('FinaSU canonical native build/packaging failed')
+        for arguments, retry_gradle in commands:
+            run_stage(arguments, source, environment, password, retry_gradle=retry_gradle)
     apks = list((output / 'native-fina').rglob('*.apk'))
     if len(apks) != 1 or apks[0].is_symlink():
         raise ValueError('Expected exactly one canonically repacked full-ABI FinaSU APK')
