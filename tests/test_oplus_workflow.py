@@ -177,29 +177,31 @@ class OplusWorkflowTests(unittest.TestCase):
         self.assertNotIn('continue-on-error', preflight)
         self.assertLess(steps.index(preflight), steps.index(sources))
 
-    def test_all_eight_manager_modules_finish_exact_cache_retries_before_packaging(self):
-        from manager_lkm_jobs import KMIS, lkm_cache_key
+    def test_all_eight_manager_modules_arrive_as_exact_same_run_artifacts_before_verification(self):
+        from manager_lkm_jobs import KMIS, lkm_artifact_name
         for document in (self.base, self.document):
             steps = document['jobs']['build-sukisu-manager']['steps']
             package = next(i for i, step in enumerate(steps) if 'prepare_manager_lkm.py stage' in step.get('run', ''))
             ids = [step['id'] for step in steps if 'id' in step]
             self.assertEqual(len(ids), len(set(ids)))
+            downloads = [step for step in steps if step.get('uses') == 'actions/download-artifact@v8'
+                         and step.get('with', {}).get('path', '').startswith('manager-lkm/')]
+            self.assertEqual(len(KMIS), len(downloads))
             for index, kmi in enumerate(KMIS):
-                prefix = 'manager-lkm-' + str(index)
-                expected = lkm_cache_key(repr(kmi), f'fromJSON(needs.prepare-matrix.outputs.ddk_matrix).include[{index}].ddk_short')
-                attempts = [step for step in steps if step.get('id') in
-                            (prefix, prefix + '-retry-1', prefix + '-retry-2')]
-                self.assertEqual(3, len(attempts))
-                for step in attempts:
-                    self.assertEqual(expected, step['with']['key'])
-                    self.assertEqual('manager-lkm/' + kmi, step['with']['path'])
-                    self.assertIs(step['with']['lookup-only'], False)
-                    self.assertNotIn('restore-keys', step['with'])
-                gate = next(step for step in steps if step.get('id') == prefix + '-ready')
-                self.assertEqual(expected, gate['env']['EXPECTED_CACHE_KEY'])
-                self.assertNotIn('continue-on-error', gate)
-                self.assertLess(steps.index(attempts[-1]), steps.index(gate))
-                self.assertLess(steps.index(gate), package)
+                expected = lkm_artifact_name(repr(kmi), f'fromJSON(needs.prepare-matrix.outputs.ddk_matrix).include[{index}].ddk_short')
+                matches = [step for step in downloads if step['with']['path'] == 'manager-lkm/' + kmi]
+                self.assertEqual(1, len(matches))
+                step = matches[0]
+                self.assertEqual(expected, step['with']['name'])
+                self.assertNotIn('continue-on-error', step)
+                for option in ('pattern', 'merge-multiple', 'github-token', 'repository', 'run-id'):
+                    self.assertNotIn(option, step['with'], 'Native artifacts must come from this run only')
+                self.assertLess(steps.index(step), package)
+            self.assertFalse(any(step.get('uses', '').startswith('actions/cache/')
+                                 and step.get('with', {}).get('path', '').startswith('manager-lkm/')
+                                 for step in steps), 'Packaging must not depend on cache availability')
+            self.assertFalse(any('EXPECTED_CACHE_KEY' in step.get('env', {}) for step in steps))
+            self.assertIn('manager_full_native.py stage', steps[package]['run'])
 
     def test_worker_orders_real_native_phases_then_verified_payload_package_upload(self):
         worker = self.document['jobs']['build-oplus-kernel']

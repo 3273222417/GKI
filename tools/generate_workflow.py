@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 from workflow_jobs import (updater_workflow, release_job, cleanup_history_workflow,
                            successful_cleanup_sweep_step, reorder_release_workflow)
-from manager_lkm_jobs import (KMIS, SOURCE_BUNDLE_PATH, load_ddk_matrix, lkm_cache_key, lkm_cache_restore_steps,
+from manager_lkm_jobs import (KMIS, SOURCE_BUNDLE_PATH, load_ddk_matrix, lkm_artifact_name, lkm_artifact_download_step,
                               manager_lkm_job, source_cache_restore, source_backup_restore, source_backup_recache,
                               source_cache_verify)
 from additional_manager_jobs import LOCAL_IF, ALL_IF, extend_manager_job
@@ -233,11 +233,10 @@ document = {'manager_package':os.environ['MANAGER_PACKAGE'],
 pathlib.Path(os.environ['RUNNER_TEMP'],'manager-public-certificate.json').write_text(json.dumps(document)+'\\n')
 PY
 '''},
-            *[step for index, kmi in enumerate(KMIS)
-              for step in lkm_cache_restore_steps(
-                  lkm_cache_key(repr(kmi), f'fromJSON(needs.prepare-matrix.outputs.ddk_matrix).include[{index}].ddk_short'),
-                  'manager-lkm/' + kmi, id_prefix='manager-lkm-' + str(index),
-                  name='读取镜像修补模块 ' + kmi)],
+            *[lkm_artifact_download_step(
+                  lkm_artifact_name(repr(kmi), f'fromJSON(needs.prepare-matrix.outputs.ddk_matrix).include[{index}].ddk_short'),
+                  'manager-lkm/' + kmi, name='读取本次已核实的镜像修补模块 ' + kmi)
+              for index, kmi in enumerate(KMIS)],
             {'name': '按官方流程打包完整 LKM 模块',
              'env': {'KSU_REF': '${{ needs.prepare-matrix.outputs.ksu_ref }}'},
              'run': '''python3 tools/prepare_manager_lkm.py stage --source manager-source --artifacts manager-lkm \\
@@ -939,6 +938,11 @@ def public_workflow_names(value):
     """Render current manager labels while build identities retain their recorded keys."""
     if isinstance(value, dict):
         for key, child in value.items():
+            # Action inputs such as artifact names are machine identities.
+            # Rewriting matrix.variant inside their output lookups would turn
+            # an internal SukiSU key into a nonexistent SukiSU-Nova key.
+            if key == 'with':
+                continue
             if key in ('name', 'description') and isinstance(child, str):
                 child = re.sub(r'\bSukiSU\b(?![-_])', 'SukiSU-Nova', child)
                 child = re.sub(r'\bmatrix\.variant\b',
