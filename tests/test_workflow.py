@@ -43,6 +43,29 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(self.workflow['on']['workflow_dispatch']['inputs']), 25)
         self.assertTrue(all('uses' not in job for job in self.workflow['jobs'].values()))
 
+    def test_generated_native_artifact_names_keep_internal_manager_output_indices(self):
+        # Check the checked-in documents after public label conversion. A
+        # display-only rename must not turn the SukiSU_* output keys into
+        # nonexistent SukiSU-Nova_* keys inside actions' machine identifiers.
+        import yaml
+        for filename in ('kernel-full-feature-matrix.yml', 'oplus-full-feature-matrix.yml'):
+            document = yaml.safe_load((ROOT / '.github/workflows' / filename).read_text('utf-8'))
+            transfers = [step for job in document['jobs'].values() for step in job.get('steps', [])
+                         if step.get('uses', '').startswith(('actions/upload-artifact@', 'actions/download-artifact@'))
+                         and step.get('with', {}).get('name', '').startswith('internal-manager-native-')]
+            self.assertEqual(9, len(transfers), filename)
+            for step in transfers:
+                name = step['with']['name']
+                with self.subTest(workflow=filename, step=step['name']):
+                    self.assertTrue(name.startswith('internal-manager-native-${{ matrix.variant }}-'))
+                    self.assertNotIn('SukiSU-Nova', name)
+                    for field in ('ksu_ref', 'native_source_version', 'manager_cert_sha256'):
+                        self.assertIn("needs.prepare-matrix.outputs[format('{0}_" + field + "', matrix.variant)]", name)
+                    if step['uses'].startswith('actions/download-artifact@'):
+                        self.assertIn("needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]", name)
+                        self.assertNotIn('run-id', step['with'])
+                        self.assertNotIn('github-token', step['with'])
+
     def test_real_boot_patch_check_must_pass_before_signing_and_upload(self):
         steps = self.workflow['jobs']['build-sukisu-manager']['steps']
         index = next(i for i, step in enumerate(steps)
@@ -720,9 +743,24 @@ class WorkflowTests(unittest.TestCase):
                     self.assertEqual(expected, result.stdout.splitlines(), result.stderr)
 
     def test_public_files_are_never_uploaded_with_duplicate_release_wrappers(self):
-        for job in self.workflow['jobs'].values():
+        internal_modules = []
+        for job_name, job in self.workflow['jobs'].items():
             for step in job.get('steps', []):
                 if not step.get('uses', '').startswith('actions/upload-artifact@'):
+                    continue
+                if job_name == 'build-sukisu-lkm':
+                    # This private, same-run handoff transports the verified
+                    # module files; release publishers still select raw APKs
+                    # and kernel images only.
+                    internal_modules.append(step)
+                    self.assertTrue(step['with']['name'].startswith('internal-manager-native-'))
+                    self.assertEqual('manager-lkm/${{ matrix.kmi }}', step['with']['path'])
+                    self.assertEqual(1, step['with']['retention-days'])
+                    self.assertEqual(1, step['with']['compression-level'])
+                    self.assertIs(step['with']['overwrite'], True)
+                    self.assertEqual('error', step['with']['if-no-files-found'])
+                    self.assertIsNot(step['with'].get('archive'), False)
+                    self.assertNotIn('continue-on-error', step)
                     continue
                 self.assertFalse(str(step.get('with', {}).get('name', '')).startswith(
                     ('Source-', 'Release-', 'Manager-Identity-', 'SukiSU-Metadata-')))
@@ -734,7 +772,7 @@ class WorkflowTests(unittest.TestCase):
                 self.assertNotIn('patch-rejects', uploaded)
                 self.assertIs(step['with'].get('archive'), False,
                               'Only final raw build files may be uploaded')
-        self.assertNotIn('actions/upload-artifact', str(self.workflow['jobs']['build-sukisu-lkm']))
+        self.assertEqual(1, len(internal_modules))
         manager = self.workflow['jobs']['build-sukisu-manager']
         public = [step for step in manager['steps'] if step.get('uses', '').startswith('actions/upload-artifact@')]
         self.assertEqual(len(public), 1)

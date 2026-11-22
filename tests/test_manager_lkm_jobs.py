@@ -1,8 +1,6 @@
-"""Validate pinned DDK selection and the exact-cache producer/consumer contract."""
+"""Validate pinned DDK selection, cache acceleration and artifact handoff."""
 import copy
-import contextlib
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -73,43 +71,6 @@ def render_key(template, *, root=ROOT, **changes):
     return re.sub(r'\$\{\{(.*?)\}\}', replace, template)
 
 
-def replay_cache_steps(steps, responses):
-    """Replay generated descriptors and execute their actual final Python gate.
-
-    Only the GitHub cache service and wait clock are simulated. No kernel,
-    module compiler, provenance verifier or final acceptance gate is mocked.
-    """
-    outputs, requests, delays = {}, [], []
-    result = {'requests': requests, 'delays': delays, 'exit': 0}
-    for step in steps:
-        if 'if' in step:
-            checks = []
-            for part in step['if'].split(' && '):
-                match = re.fullmatch(r"steps\.([a-z0-9-]+)\.outputs\.cache-hit != 'true'", part)
-                if match is None:
-                    raise AssertionError('Unexpected generated retry condition: ' + part)
-                checks.append(outputs.get(match[1], {}).get('cache-hit', '') != 'true')
-            if not all(checks):
-                continue
-        if step.get('uses') == 'actions/cache/restore@v5':
-            requests.append(step['with'])
-            outputs[step['id']] = responses[len(requests) - 1] if len(requests) <= len(responses) else {}
-        elif step['run'].startswith('sleep '):
-            delays.append(int(step['run'].split()[1]))
-        else:
-            environment = {}
-            for field, value in step['env'].items():
-                match = re.fullmatch(r'\$\{\{ steps\.([a-z0-9-]+)\.outputs\.([a-z-]+) \}\}', value)
-                environment[field] = outputs.get(match[1], {}).get(match[2], '') if match else value
-            command = step['run'].split("python3 - <<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
-            try:
-                with patch.dict(os.environ, environment), contextlib.redirect_stdout(io.StringIO()):
-                    exec(compile(command, '<lkm-exact-cache-gate>', 'exec'), {})
-            except SystemExit as error:
-                result['exit'] = error.code
-    return result
-
-
 class ManagerLkmJobTests(unittest.TestCase):
     def setUp(self):
         self.directory = ROOT / 'tests' / ('.lkm-jobs-' + uuid.uuid4().hex)
@@ -127,6 +88,97 @@ class ManagerLkmJobTests(unittest.TestCase):
 
     def write_lock(self, document=None):
         self.path.write_text(json.dumps(self.lock if document is None else document), encoding='utf-8')
+
+    def test_partial_native_cache_cleanup_removes_only_selected_kmi_before_rebuild(self):
+        parent = self.directory / 'manager-lkm'
+        partial = parent / jobs.KMIS[0]
+        (partial / 'extras/x86_64').mkdir(parents=True)
+        (partial / 'module.json').write_bytes(b'{incomplete cache manifest')
+        (partial / (jobs.KMIS[0] + '_kernelsu.ko')).write_bytes(b'partial module')
+        (partial / 'extras/x86_64/partial.ko').write_bytes(b'partial extra')
+        sibling = parent / jobs.KMIS[1]
+        sibling.mkdir()
+        (sibling / 'module.json').write_bytes(b'preserve sibling metadata')
+        (sibling / 'complete.ko').write_bytes(b'preserve sibling module')
+        before = {p.relative_to(sibling): p.read_bytes() for p in sibling.rglob('*') if p.is_file()}
+
+        jobs.clear_partial_native_output(self.directory, jobs.KMIS[0])
+
+        self.assertFalse(partial.exists())
+        self.assertEqual(before, {p.relative_to(sibling): p.read_bytes() for p in sibling.rglob('*') if p.is_file()})
+        self.assertTrue((self.directory / 'tools/build_manager_extras.sh').is_file())
+
+    def test_partial_native_cache_cleanup_is_harmless_when_output_is_absent(self):
+        jobs.clear_partial_native_output(self.directory, jobs.KMIS[0])
+        self.assertFalse((self.directory / 'manager-lkm').exists())
+        parent = self.directory / 'manager-lkm'
+        parent.mkdir()
+        marker = parent / 'untouched.txt'
+        marker.write_bytes(b'keep')
+        jobs.clear_partial_native_output(self.directory, jobs.KMIS[0])
+        self.assertEqual(b'keep', marker.read_bytes())
+
+    def test_partial_native_cache_cleanup_rejects_illegal_kmis_and_regular_file_targets(self):
+        marker = self.directory / 'do-not-delete'
+        marker.write_bytes(b'caller-owned')
+        external = self.directory.parent / ('.lkm-keep-external-' + uuid.uuid4().hex)
+        external.write_bytes(b'external caller-owned')
+        self.addCleanup(external.unlink, missing_ok=True)
+        for kmi in ('', '..', '../do-not-delete', 'android99-99.99', jobs.KMIS[0] + '/..',
+                    jobs.KMIS[0] + '\n', str(external), '../../' + external.name, None):
+            with self.subTest(kmi=kmi), self.assertRaises(ValueError):
+                jobs.clear_partial_native_output(self.directory, kmi)
+            self.assertEqual(b'caller-owned', marker.read_bytes())
+            self.assertEqual(b'external caller-owned', external.read_bytes())
+        target = self.directory / 'manager-lkm' / jobs.KMIS[0]
+        target.parent.mkdir()
+        target.write_bytes(b'not a directory')
+        with self.assertRaisesRegex(ValueError, 'not a directory'):
+            jobs.clear_partial_native_output(self.directory, jobs.KMIS[0])
+        self.assertEqual(b'not a directory', target.read_bytes())
+
+    def linked_native_output(self, *, parent_link):
+        outside = self.directory.parent / ('.lkm-external-' + uuid.uuid4().hex)
+        outside.mkdir()
+        self.addCleanup(shutil.rmtree, outside)
+        (outside / jobs.KMIS[0]).mkdir()
+        marker = outside / jobs.KMIS[0] / 'outside.ko'
+        marker.write_bytes(b'external module must survive')
+        parent = self.directory / 'manager-lkm'
+        if parent_link:
+            link, destination = parent, outside
+        else:
+            parent.mkdir()
+            link, destination = parent / jobs.KMIS[0], outside / jobs.KMIS[0]
+        try:
+            link.symlink_to(destination, target_is_directory=True)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest('Directory symlinks are unavailable on this platform: ' + type(error).__name__)
+        self.addCleanup(link.unlink, missing_ok=True)
+        self.assertFalse((parent / jobs.KMIS[0]).resolve().is_relative_to(self.directory.resolve()))
+        with self.assertRaisesRegex(ValueError, 'linked'):
+            jobs.clear_partial_native_output(self.directory, jobs.KMIS[0])
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(b'external module must survive', marker.read_bytes())
+
+    def test_partial_native_cache_cleanup_rejects_target_symlink_without_deleting_external_files(self):
+        self.linked_native_output(parent_link=False)
+
+    def test_partial_native_cache_cleanup_rejects_parent_symlink_without_deleting_external_files(self):
+        self.linked_native_output(parent_link=True)
+
+    def test_partial_cleanup_runs_only_on_cache_miss_before_compilation_or_recording(self):
+        steps = jobs.manager_lkm_job('true')['steps']
+        build = next(step for step in steps if 'docker run' in step.get('run', ''))
+        hit = next(step for step in steps if step['name'] == '核实已缓存的原生模块')
+        self.assertIn("cache-hit != 'true'", build['if'])
+        self.assertIn("cache-hit == 'true'", hit['if'])
+        self.assertNotIn('clear_partial_native_output', hit['run'])
+        self.assertNotIn('continue-on-error', hit)
+        self.assertLess(build['run'].index('clear_partial_native_output(Path.cwd()'),
+                        build['run'].index('prepare_manager_lkm.py version-code'))
+        self.assertLess(build['run'].index('clear_partial_native_output(Path.cwd()'),
+                        build['run'].index('prepare_manager_lkm.py record'))
 
     def test_loader_preserves_all_eight_official_kmis_and_derives_digest_from_image(self):
         self.lock['images'].reverse()
@@ -254,7 +306,7 @@ class ManagerLkmJobTests(unittest.TestCase):
                 value = render_key(template, **{**identity, 'matrix.kmi': kmi})
                 self.assertLessEqual(len(value.encode('utf-8')), 512)
 
-    def test_exact_cache_is_strict_and_transfers_no_module_artifacts(self):
+    def test_producer_cache_accelerates_verified_same_run_artifact_publication(self):
         job = jobs.manager_lkm_job('supplied-condition')
         self.assertEqual('supplied-condition', job['if'])
         self.assertEqual('prepare-matrix', job['needs'])
@@ -267,110 +319,86 @@ class ManagerLkmJobTests(unittest.TestCase):
         steps = job['steps']
         caches = [step for step in steps if step.get('uses', '').startswith('actions/cache/')
                   and step.get('with', {}).get('path', '').startswith('manager-lkm/')]
-        self.assertEqual(['actions/cache/restore@v5', 'actions/cache/save@v5',
-                          *['actions/cache/restore@v5'] * 3],
-                         [step['uses'] for step in caches])
+        self.assertEqual(['actions/cache/restore@v5', 'actions/cache/save@v5'], [s['uses'] for s in caches])
         for step in caches:
+            self.assertTrue(step['continue-on-error'])
             self.assertNotIn('restore-keys', step['with'])
+            self.assertNotIn('lookup-only', step['with'])
             self.assertEqual('manager-lkm/${{ matrix.kmi }}', step['with']['path'])
             self.assertEqual(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'), step['with']['key'])
-        for step in caches[:2]:
-            self.assertNotIn('continue-on-error', step)
-        for step in caches[2:]:
-            self.assertTrue(step['with']['lookup-only'])
-            self.assertFalse(step['with']['fail-on-cache-miss'])
-            self.assertTrue(step['continue-on-error'])
-        self.assertEqual('lkm-published-ready', steps[-1]['id'])
-        self.assertNotIn('continue-on-error', steps[-1])
-        self.assertIn('raise SystemExit', steps[-1]['run'])
-        self.assertFalse(any('upload-artifact' in step.get('uses', '') for step in steps))
+        publications = [step for step in steps if step.get('uses') == 'actions/upload-artifact@v7']
+        self.assertEqual(1, len(publications))
+        publication = publications[0]
+        self.assertIs(publication, steps[-1])
+        self.assertNotIn('if', publication)  # Publish cache hits as well as fresh builds.
+        self.assertNotIn('continue-on-error', publication)
+        self.assertEqual(jobs.lkm_artifact_name('matrix.kmi', 'matrix.ddk_short'), publication['with']['name'])
+        self.assertEqual('manager-lkm/${{ matrix.kmi }}', publication['with']['path'])
+        self.assertEqual(1, publication['with']['retention-days'])
+        self.assertEqual(1, publication['with']['compression-level'])
+        self.assertTrue(publication['with']['overwrite'])
+        self.assertEqual('error', publication['with']['if-no-files-found'])
+        self.assertTrue(publication['with'].get('archive', True))
+        self.assertFalse(any('lkm-published' in step.get('id', '') for step in steps))
         self.assertFalse(steps[0]['with']['persist-credentials'])
         hit = next(step for step in steps if '--expected-kmis "$KMI"' in step.get('run', ''))
         build = next(step for step in steps if 'docker run' in step.get('run', ''))
+        extras = next(step for step in steps if 'bash tools/build_manager_extras.sh' in step.get('run', ''))
         self.assertIn("cache-hit == 'true'", hit['if'])
+        self.assertIn('prepare_manager_lkm.py stage', hit['run'])
+        self.assertIn('manager_full_native.py stage', hit['run'])
         self.assertIn("cache-hit != 'true'", build['if'])
         self.assertIn("cache-hit != 'true'", caches[1]['if'])
-        self.assertLess(steps.index(hit), steps.index(build))
-        self.assertLess(steps.index(build), steps.index(caches[1]))
+        self.assertLess(steps.index(hit), steps.index(publication))
+        self.assertLess(steps.index(build), steps.index(extras))
+        self.assertLess(steps.index(extras), steps.index(caches[1]))
+        self.assertLess(steps.index(caches[1]), steps.index(publication))
 
-    def test_cache_visibility_lag_retries_exact_key_and_stops_on_later_hit(self):
-        key = render_key(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'))
-        for lookup_only in (True, False):
-            steps = jobs.lkm_cache_restore_steps(key, 'manager-lkm/android12-5.10',
-                id_prefix='retry-kmi', name='strict cache', lookup_only=lookup_only)
-            for responses in ([{}, {'cache-hit': 'true', 'cache-matched-key': key}],
-                              [{}, {}, {'cache-hit': 'true', 'cache-matched-key': key}]):
-                replay = replay_cache_steps(steps, responses)
-                with self.subTest(lookup_only=lookup_only, responses=responses):
-                    self.assertEqual(0, replay['exit'])
-                    self.assertEqual(len(responses), len(replay['requests']))
-                    self.assertEqual([10] if len(responses) == 2 else [10, 20], replay['delays'])
-                    self.assertTrue(all(request['key'] == key and request['lookup-only'] == lookup_only
-                                        and not request['fail-on-cache-miss'] for request in replay['requests']))
-            immediate = replay_cache_steps(steps, [{'cache-hit': 'true', 'cache-matched-key': key}])
-            self.assertEqual(0, immediate['exit'])
-            self.assertEqual(1, len(immediate['requests']))
-            self.assertEqual([], immediate['delays'])
+    def test_artifact_name_binds_every_native_identity_without_runner_local_fields(self):
+        template = jobs.lkm_artifact_name('matrix.kmi', 'matrix.ddk_short')
+        baseline = render_key(template)
+        self.assertEqual('internal-manager-native-SukiSU-' + 'a' * 40 + '-' + 'd' * 16
+                         + '-android12-5.10-' + 'c' * 16 + '-' + 'b' * 64, baseline)
+        for field, value in (
+            ('inputs.kernelsu_variant', 'KowSU'), ('needs.prepare-matrix.outputs.ksu_ref', 'f' * 40),
+            ('needs.prepare-matrix.outputs.native_source_version', 'e' * 16),
+            ('matrix.kmi', 'android13-5.15'), ('matrix.ddk_short', 'a' * 16),
+            ('needs.prepare-matrix.outputs.manager_cert_sha256', 'c' * 64),
+        ):
+            with self.subTest(field=field):
+                self.assertNotEqual(baseline, render_key(template, **{field: value}))
+        self.assertEqual(baseline, render_key(template, **{'runner.os': 'Windows', 'runner.arch': 'ARM64'}))
+        for bad in ('', '${{ matrix.kmi }}', 'matrix.kmi\nignored'):
+            with self.assertRaises(ValueError):
+                jobs.lkm_artifact_name(bad, 'matrix.ddk_short')
 
-    def test_all_cache_misses_fail_after_bounded_retries_without_another_build_or_transport(self):
-        key = render_key(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'))
-        steps = jobs.lkm_cache_restore_steps(key, 'manager-lkm/android12-5.10',
-            id_prefix='bounded', name='strict cache', lookup_only=True)
-        replay = replay_cache_steps(steps, [{}, {}, {}])
-        self.assertIn('three bounded attempts', replay['exit'])
-        self.assertEqual(3, len(replay['requests']))
-        self.assertEqual([10, 20], replay['delays'])
-        self.assertEqual(6, len(steps))
-        for step in steps:
-            if 'uses' in step:
-                self.assertEqual('actions/cache/restore@v5', step['uses'])
-                self.assertEqual(3, step['timeout-minutes'])
-                self.assertNotIn('restore-keys', step['with'])
-            else:
-                self.assertTrue(step['run'].startswith(('sleep ', 'python3 -')))
-        self.assertNotIn('continue-on-error', steps[-1])
+    def test_artifact_download_is_exact_same_run_and_fails_closed(self):
+        artifact = jobs.lkm_artifact_name("'android12-5.10'", "'" + 'c' * 16 + "'")
+        step = jobs.lkm_artifact_download_step(artifact, 'manager-lkm/android12-5.10', name='Read module')
+        self.assertEqual('actions/download-artifact@v8', step['uses'])
+        self.assertEqual('Read module', step['name'])
+        self.assertEqual({'name': artifact, 'path': 'manager-lkm/android12-5.10'}, step['with'])
+        self.assertNotIn('if', step)
+        self.assertNotIn('continue-on-error', step)
+        self.assertNotIn('env', step)
+        optional = jobs.lkm_artifact_download_step(artifact, 'manager-lkm/android12-5.10',
+                                                 name='Read module', condition='inputs.build_manager')
+        self.assertEqual('inputs.build_manager', optional['if'])
+        for field in ('github-token', 'run-id', 'pattern', 'merge-multiple'):
+            self.assertNotIn(field, step['with'])
 
-    def test_a_cache_hit_for_another_source_signature_or_kmi_never_passes_the_gate(self):
-        key = render_key(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'))
-        steps = jobs.lkm_cache_restore_steps(key, 'manager-lkm/android12-5.10',
-            id_prefix='identity', name='strict cache')
-        wrong = (render_key(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'),
-                            **{'needs.prepare-matrix.outputs.ksu_ref': 'f' * 40}),
-                 render_key(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'),
-                            **{'needs.prepare-matrix.outputs.manager_cert_sha256': 'e' * 64}),
-                 render_key(jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short'),
-                            **{'matrix.kmi': 'android13-5.15'}))
-        for matched in wrong:
-            with self.subTest(matched=matched):
-                # A partial service match is never enough. Even an incorrectly
-                # reported cache-hit=true cannot bypass the exact-key gate.
-                for hit in ('false', 'true'):
-                    replay = replay_cache_steps(steps, [{'cache-hit': hit, 'cache-matched-key': matched}] * 3)
-                    self.assertIn('no other source or signature cache', replay['exit'])
-                    self.assertTrue(all(request['key'] == key for request in replay['requests']))
-
-    def test_fixed_consumers_and_matrix_producer_retry_the_identical_native_identity(self):
-        for variant in ('SukiSU', 'BakaSU'):
+    def test_fixed_consumers_and_matrix_producers_select_identical_artifacts(self):
+        for variant in ('SukiSU', 'BakaSU', 'KernelSU-Next', 'KernelSU', 'KowSU', 'FinaSU'):
             for row in jobs.load_ddk_matrix(ROOT):
-                dynamic = jobs.lkm_cache_key('matrix.kmi', 'matrix.ddk_short')
-                fixed = jobs.lkm_cache_key(repr(row['kmi']), repr(row['ddk_short']))
+                dynamic = jobs.lkm_artifact_name('matrix.kmi', 'matrix.ddk_short')
+                fixed = jobs.lkm_artifact_name(repr(row['kmi']), repr(row['ddk_short']))
                 fields = {'inputs.kernelsu_variant': variant, 'matrix.kmi': row['kmi'],
                           'matrix.ddk_short': row['ddk_short']}
-                producer = jobs.lkm_cache_restore_steps(dynamic, 'manager-lkm/' + row['kmi'],
-                    id_prefix='producer', name='publish', lookup_only=True)
-                consumer = jobs.lkm_cache_restore_steps(fixed, 'manager-lkm/' + row['kmi'],
-                    id_prefix='consumer', name='restore')
                 with self.subTest(variant=variant, kmi=row['kmi']):
                     expected = render_key(dynamic, **fields)
-                    for step in producer + consumer:
-                        if 'uses' in step:
-                            self.assertEqual(expected, render_key(step['with']['key'], **fields))
-                            self.assertNotIn('restore-keys', step['with'])
-                    self.assertEqual(expected, render_key(consumer[-1]['env']['EXPECTED_CACHE_KEY'], **fields))
-        optional = jobs.lkm_cache_restore_steps('exact-key', 'manager-lkm/kmi',
-            id_prefix='optional', name='restore', condition='inputs.build_manager')
-        self.assertEqual('inputs.build_manager', optional[-1]['if'])
-        self.assertTrue(all('inputs.build_manager' in step['if'] for step in optional))
+                    consumer = jobs.lkm_artifact_download_step(fixed, 'manager-lkm/' + row['kmi'], name='Read module')
+                    self.assertEqual(expected, render_key(consumer['with']['name'], **fields))
+                    self.assertNotIn('run-id', consumer['with'])
 
     def test_source_uses_exact_prepared_cache_key_and_never_downloads_an_artifact(self):
         steps = jobs.manager_lkm_job('true')['steps']

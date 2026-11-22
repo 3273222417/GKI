@@ -736,6 +736,7 @@ jobs:
       id: lkm-cache
       uses: actions/cache/restore@v5
       timeout-minutes: 3
+      continue-on-error: true
       env:
         SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
@@ -777,6 +778,14 @@ jobs:
         KSU_REF: ${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)] }}
       run: |
         set -euo pipefail
+        python3 - <<'PY'
+        import os
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, 'tools')
+        from manager_lkm_jobs import clear_partial_native_output
+        clear_partial_native_output(Path.cwd(), os.environ['KMI'])
+        PY
         mkdir -p lkm-output
         KSU_VERSION=$(python3 tools/prepare_manager_lkm.py version-code   --source manager-source --expected-ref "$KSU_REF")
         docker pull "$DDK_IMAGE"
@@ -816,23 +825,7 @@ jobs:
         == ''
       uses: actions/cache/save@v5
       timeout-minutes: 3
-      with:
-        path: manager-lkm/${{ matrix.kmi }}
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ matrix.kmi
-          }}-${{ matrix.ddk_short }}${{ format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py'))
-          }}${{ matrix.variant == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json'))
-          || '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-    - name: 确认管理器可读取原生模块缓存（第 1 次）
-      id: lkm-published
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
       continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
         path: manager-lkm/${{ matrix.kmi }}
         key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
@@ -843,89 +836,18 @@ jobs:
           }}${{ matrix.variant == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json'))
           || '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
           'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: true
-        fail-on-cache-miss: false
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 确认管理器可读取原生模块缓存（等待后重试 1）
-      if: (steps.lkm-published.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 确认管理器可读取原生模块缓存（第 2 次）
-      id: lkm-published-retry-1
-      uses: actions/cache/restore@v5
+    - name: 上传本次已核实的原生模块
+      uses: actions/upload-artifact@v7
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ matrix.kmi }}-${{
+          matrix.ddk_short }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/${{ matrix.kmi }}
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ matrix.kmi
-          }}-${{ matrix.ddk_short }}${{ format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py'))
-          }}${{ matrix.variant == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json'))
-          || '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: true
-        fail-on-cache-miss: false
-      if: (steps.lkm-published.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 确认管理器可读取原生模块缓存（等待后重试 2）
-      if: (steps.lkm-published.outputs.cache-hit != 'true' && steps.lkm-published-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 确认管理器可读取原生模块缓存（第 3 次）
-      id: lkm-published-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/${{ matrix.kmi }}
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ matrix.kmi
-          }}-${{ matrix.ddk_short }}${{ format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py'))
-          }}${{ matrix.variant == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json'))
-          || '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: true
-        fail-on-cache-miss: false
-      if: (steps.lkm-published.outputs.cache-hit != 'true' && steps.lkm-published-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 确认管理器可读取原生模块缓存
-      id: lkm-published-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ matrix.kmi
-          }}-${{ matrix.ddk_short }}${{ format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py'))
-          }}${{ matrix.variant == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json'))
-          || '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.lkm-published.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.lkm-published.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.lkm-published-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.lkm-published-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.lkm-published-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.lkm-published-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
+        retention-days: 1
+        compression-level: 1
+        if-no-files-found: error
+        overwrite: true
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
   build-sukisu-manager:
     name: 编译配套 ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 管理器 APK
@@ -1141,845 +1063,85 @@ jobs:
         pathlib.Path(os.environ['RUNNER_TEMP'],'manager-public-certificate.json').write_text(json.dumps(document)+'\n')
         PY
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android12-5.10（第 1 次）
-      id: manager-lkm-0
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android12-5.10
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android12-5.10'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[0].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android12-5.10
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android12-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[0].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android12-5.10（等待后重试 1）
-      if: (steps.manager-lkm-0.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android12-5.10（第 2 次）
-      id: manager-lkm-0-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android13-5.10
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android12-5.10
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android12-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[0].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-0.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android12-5.10（等待后重试 2）
-      if: (steps.manager-lkm-0.outputs.cache-hit != 'true' && steps.manager-lkm-0-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android12-5.10（第 3 次）
-      id: manager-lkm-0-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android12-5.10
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android12-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[0].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-0.outputs.cache-hit != 'true' && steps.manager-lkm-0-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android12-5.10
-      id: manager-lkm-0-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android12-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[0].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-0.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-0.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-0-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-0-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-0-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-0-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.10（第 1 次）
-      id: manager-lkm-1
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android13-5.10'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[1].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android13-5.10
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[1].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.10（等待后重试 1）
-      if: (steps.manager-lkm-1.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android13-5.10（第 2 次）
-      id: manager-lkm-1-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android13-5.15
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android13-5.10
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[1].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-1.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.10（等待后重试 2）
-      if: (steps.manager-lkm-1.outputs.cache-hit != 'true' && steps.manager-lkm-1-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android13-5.10（第 3 次）
-      id: manager-lkm-1-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android13-5.10
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[1].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-1.outputs.cache-hit != 'true' && steps.manager-lkm-1-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.10
-      id: manager-lkm-1-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.10'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[1].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-1.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-1.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-1-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-1-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-1-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-1-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.15（第 1 次）
-      id: manager-lkm-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android13-5.15'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[2].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android13-5.15
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[2].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.15（等待后重试 1）
-      if: (steps.manager-lkm-2.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android13-5.15（第 2 次）
-      id: manager-lkm-2-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android14-5.15
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android13-5.15
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[2].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-2.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.15（等待后重试 2）
-      if: (steps.manager-lkm-2.outputs.cache-hit != 'true' && steps.manager-lkm-2-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android13-5.15（第 3 次）
-      id: manager-lkm-2-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android13-5.15
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[2].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-2.outputs.cache-hit != 'true' && steps.manager-lkm-2-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android13-5.15
-      id: manager-lkm-2-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android13-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[2].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-2.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-2.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-2-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-2-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-2-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-2-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-5.15（第 1 次）
-      id: manager-lkm-3
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android14-5.15'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[3].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android14-5.15
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[3].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-5.15（等待后重试 1）
-      if: (steps.manager-lkm-3.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android14-5.15（第 2 次）
-      id: manager-lkm-3-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android14-6.1
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android14-5.15
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[3].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-3.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-5.15（等待后重试 2）
-      if: (steps.manager-lkm-3.outputs.cache-hit != 'true' && steps.manager-lkm-3-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android14-5.15（第 3 次）
-      id: manager-lkm-3-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android14-5.15
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[3].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-3.outputs.cache-hit != 'true' && steps.manager-lkm-3-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-5.15
-      id: manager-lkm-3-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-5.15'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[3].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-3.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-3.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-3-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-3-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-3-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-3-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-6.1（第 1 次）
-      id: manager-lkm-4
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android14-6.1'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[4].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android14-6.1
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-6.1'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[4].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-6.1（等待后重试 1）
-      if: (steps.manager-lkm-4.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android14-6.1（第 2 次）
-      id: manager-lkm-4-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android15-6.6
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android14-6.1
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-6.1'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[4].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-4.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-6.1（等待后重试 2）
-      if: (steps.manager-lkm-4.outputs.cache-hit != 'true' && steps.manager-lkm-4-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android14-6.1（第 3 次）
-      id: manager-lkm-4-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android14-6.1
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-6.1'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[4].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-4.outputs.cache-hit != 'true' && steps.manager-lkm-4-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android14-6.1
-      id: manager-lkm-4-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android14-6.1'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[4].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-4.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-4.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-4-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-4-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-4-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-4-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android15-6.6（第 1 次）
-      id: manager-lkm-5
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android15-6.6'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[5].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android15-6.6
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android15-6.6'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[5].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android15-6.6（等待后重试 1）
-      if: (steps.manager-lkm-5.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android15-6.6（第 2 次）
-      id: manager-lkm-5-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android16-6.12
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android15-6.6
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android15-6.6'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[5].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-5.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android15-6.6（等待后重试 2）
-      if: (steps.manager-lkm-5.outputs.cache-hit != 'true' && steps.manager-lkm-5-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android15-6.6（第 3 次）
-      id: manager-lkm-5-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android15-6.6
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android15-6.6'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[5].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-5.outputs.cache-hit != 'true' && steps.manager-lkm-5-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android15-6.6
-      id: manager-lkm-5-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android15-6.6'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[5].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-5.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-5.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-5-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-5-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-5-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-5-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android16-6.12（第 1 次）
-      id: manager-lkm-6
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android16-6.12'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[6].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android16-6.12
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android16-6.12'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[6].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android16-6.12（等待后重试 1）
-      if: (steps.manager-lkm-6.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android16-6.12（第 2 次）
-      id: manager-lkm-6-retry-1
-      uses: actions/cache/restore@v5
+    - name: 读取本次已核实的镜像修补模块 android17-6.18
+      uses: actions/download-artifact@v8
       timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
       with:
-        path: manager-lkm/android16-6.12
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android16-6.12'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[6].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-6.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android16-6.12（等待后重试 2）
-      if: (steps.manager-lkm-6.outputs.cache-hit != 'true' && steps.manager-lkm-6-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android16-6.12（第 3 次）
-      id: manager-lkm-6-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android16-6.12
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android16-6.12'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[6].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-6.outputs.cache-hit != 'true' && steps.manager-lkm-6-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android16-6.12
-      id: manager-lkm-6-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android16-6.12'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[6].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-6.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-6.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-6-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-6-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-6-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-6-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android17-6.18（第 1 次）
-      id: manager-lkm-7
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
+        name: internal-manager-native-${{ matrix.variant }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref', matrix.variant)]
+          }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{ 'android17-6.18'
+          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[7].ddk_short }}-${{
+          needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}
         path: manager-lkm/android17-6.18
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android17-6.18'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[7].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android17-6.18（等待后重试 1）
-      if: (steps.manager-lkm-7.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-      shell: bash
-      run: sleep 10
-    - name: 读取镜像修补模块 android17-6.18（第 2 次）
-      id: manager-lkm-7-retry-1
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android17-6.18
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android17-6.18'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[7].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-7.outputs.cache-hit != 'true') && needs.prepare-matrix.outputs[format('{0}_manager_adoption',
-        matrix.variant)] == ''
-    - name: 读取镜像修补模块 android17-6.18（等待后重试 2）
-      if: (steps.manager-lkm-7.outputs.cache-hit != 'true' && steps.manager-lkm-7-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-      shell: bash
-      run: sleep 20
-    - name: 读取镜像修补模块 android17-6.18（第 3 次）
-      id: manager-lkm-7-retry-2
-      uses: actions/cache/restore@v5
-      timeout-minutes: 3
-      continue-on-error: true
-      env:
-        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
-      with:
-        path: manager-lkm/android17-6.18
-        key: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android17-6.18'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[7].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        lookup-only: false
-        fail-on-cache-miss: false
-      if: (steps.manager-lkm-7.outputs.cache-hit != 'true' && steps.manager-lkm-7-retry-1.outputs.cache-hit != 'true') &&
-        needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
-    - name: 读取镜像修补模块 android17-6.18
-      id: manager-lkm-7-ready
-      shell: bash
-      env:
-        EXPECTED_CACHE_KEY: gki-sukisu-lkm-v3-full-${{ runner.os }}-${{ runner.arch }}-${{ needs.prepare-matrix.outputs[format('{0}_ksu_ref',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_native_source_version', matrix.variant)] }}-${{
-          needs.prepare-matrix.outputs[format('{0}_manager_package', matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_size',
-          matrix.variant)] }}-${{ needs.prepare-matrix.outputs[format('{0}_manager_cert_sha256', matrix.variant)] }}-${{ 'android17-6.18'
-          }}-${{ fromJSON(needs.prepare-matrix.outputs[format('{0}_ddk_matrix', matrix.variant)]).include[7].ddk_short }}${{
-          format('-native-{0}', hashFiles('tools/build_manager_extras*.sh', 'tools/manager_full_native.py')) }}${{ matrix.variant
-          == 'BakaSU' && format('-kpm-{0}', hashFiles('tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) ||
-          '' }}${{ matrix.variant != 'SukiSU' && matrix.variant != 'BakaSU' && format('-kpm-{0}', hashFiles('tools/additional_manager_kpm.py',
-          'tools/patches/bakasu-kpm.patch', 'config/bakasu-kpm-port.json')) || '' }}
-        CACHE_HIT_0: ${{ steps.manager-lkm-7.outputs.cache-hit }}
-        CACHE_KEY_0: ${{ steps.manager-lkm-7.outputs.cache-matched-key }}
-        CACHE_HIT_1: ${{ steps.manager-lkm-7-retry-1.outputs.cache-hit }}
-        CACHE_KEY_1: ${{ steps.manager-lkm-7-retry-1.outputs.cache-matched-key }}
-        CACHE_HIT_2: ${{ steps.manager-lkm-7-retry-2.outputs.cache-hit }}
-        CACHE_KEY_2: ${{ steps.manager-lkm-7-retry-2.outputs.cache-matched-key }}
-      run: |
-        python3 - <<'PY'
-        import os
-        expected = os.environ['EXPECTED_CACHE_KEY']
-        matched = any(os.environ[f'CACHE_HIT_{index}'] == 'true'
-                      and os.environ[f'CACHE_KEY_{index}'] == expected for index in range(3))
-        if not expected or not matched:
-            raise SystemExit('The exact verified manager LKM cache is still unavailable after three bounded attempts; no other source or signature cache was accepted.')
-        print('The exact verified manager LKM cache is available.')
-        PY
       if: needs.prepare-matrix.outputs[format('{0}_manager_adoption', matrix.variant)] == ''
     - name: 按官方流程打包完整 LKM 模块
       env:
