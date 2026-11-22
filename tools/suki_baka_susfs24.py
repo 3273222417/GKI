@@ -11,6 +11,7 @@ from additional_susfs24 import policy_hooks
 from apply_susfs23 import PATCH_PATH, apply_reviewed_port, git as source_git, verify_integration
 from ensure_susfs_headers import without_comments
 from ensure_susfs_priority import CONFIG as PRIORITY_CONFIG, OPTION, priority_api
+from nova_symbol_variants import RESOLVER, complete_symbol_variants
 from validate_susfs_hooks import inspect_c_source, strip_comments_and_literals
 
 
@@ -359,6 +360,14 @@ def integrate(source: Path, dependency: Path, variant: str) -> tuple[Path, ...]:
         original[HIDE] = read(source, HIDE)
         updated[HIDE] = restore_selinux_lifecycle_boundary(original[HIDE])
         verify_native_selinux_query(source, updated[HIDE])
+        if re.search(r'\bselinux_hide_init_setxattr\s*\(', strip_comments_and_literals(updated[HIDE])):
+            # Nova retains its native inode-label hook. Its CFI resolver must
+            # recognize Android Clang's $hash variant as well as .llvm names.
+            native_resolver = source_git(source, 'show', 'HEAD:' + RESOLVER)
+            if native_resolver.returncode:
+                raise ValueError('Cannot bind Nova symbol variants to the selected manager source')
+            original[RESOLVER] = read(source, RESOLVER)
+            updated[RESOLVER] = complete_symbol_variants(native_resolver.stdout, original[RESOLVER])
     updated[KCONFIG] = configure(original[KCONFIG], native_preinit(source, variant), native_query=variant == 'SukiSU')
     changed = []
     for relative, text in updated.items():

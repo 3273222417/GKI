@@ -1,0 +1,61 @@
+[
+  {
+    "series": "5.10",
+    "run": 44888822305,
+    "image_sha256": "3b53ed37908fd3a96a01145316112592696f953716748aeaf6e89a2593c77195",
+    "symbols": [
+      {
+        "name": "inode_doinit_with_dentry",
+        "type": "t",
+        "address": "0xffffffc0086694ec"
+      },
+      {
+        "name": "selinux_inode_setxattr$5a44f22c31605e5b87629d8150229ae2",
+        "type": "t",
+        "address": "0xffffffc00866d40c"
+      },
+      {
+        "name": "selinux_inode_setxattr$5a44f22c31605e5b87629d8150229ae2.cfi_jt",
+        "type": "t",
+        "address": "0xffffffc009208050"
+      },
+      {
+        "name": "selinux_inode_setxattr_hook",
+        "type": "d",
+        "address": "0xffffffc00a262510"
+      },
+      {
+        "name": "inode_doinit_with_dentry_fn",
+        "type": "b",
+        "address": "0xffffffc00a62dcc8"
+      }
+    ]
+  },
+  {
+    "series": "6.6",
+    "run": 44873874356,
+    "image_sha256": "284283e86413d7377171baa72ebf8771fc8b54ccbf6a49001a9a8789f21c667c",
+    "symbols": [
+      {
+        "name": "inode_doinit_with_dentry",
+        "type": "t",
+        "address": "0xffffffc080641320"
+      },
+      {
+        "name": "selinux_inode_setxattr",
+        "type": "t",
+        "address": "0xffffffc080644aac"
+      },
+      {
+        "name": "selinux_inode_setxattr_hook",
+        "type": "d",
+        "address": "0xffffffc0822d6550"
+      },
+      {
+        "name": "inode_doinit_with_dentry_fn",
+        "type": "b",
+        "address": "0xffffffc0826491f8"
+      }
+    ]
+  }
+]

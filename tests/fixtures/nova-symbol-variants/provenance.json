@@ -1,0 +1,16 @@
+{
+  "symbol-resolver-1439545.c": {
+    "repository": "SukiSU-Nova/SukiSU-Nova",
+    "ref": "1439545f12bffe0263690ba862139b70ee5f20cf",
+    "path": "kernel/infra/symbol_resolver.c",
+    "complete_source_sha256": "af2a7f8ec624145024c2647b1d5c0b7617a2d817f9406bcd167db40111ca6c33",
+    "fixture_sha256": "af2a7f8ec624145024c2647b1d5c0b7617a2d817f9406bcd167db40111ca6c33"
+  },
+  "selinux-init-1439545.c": {
+    "repository": "SukiSU-Nova/SukiSU-Nova",
+    "ref": "1439545f12bffe0263690ba862139b70ee5f20cf",
+    "path": "kernel/feature/selinux_hide.c",
+    "complete_source_sha256": "30de2610ada01233cd9ab4521716416951be623e710863e8c9bdcbd9e6e69dfb",
+    "fixture_sha256": "bac07ef2ee804296928d2403ab62a427ade0c5a60854cff218011c474a4a40f0"
+  }
+}
