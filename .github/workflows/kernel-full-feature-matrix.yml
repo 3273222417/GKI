@@ -4974,6 +4974,7 @@ jobs:
     - name: 应用 Re-Kernel
       if: inputs.use_rekernel
       env:
+        GH_TOKEN: ${{ github.token }}
         BASH_ENV: ${{ 'aosp' == 'custom_git' && format('{0}/.github/scripts/custom-source-feature-env.sh', github.workspace)
           || '' }}
         ABK_FEATURE_ID: rekernel

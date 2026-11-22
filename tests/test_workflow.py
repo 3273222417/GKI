@@ -112,6 +112,7 @@ class WorkflowTests(unittest.TestCase):
     def test_rekernel_source_failure_stops_before_modifying_the_kernel(self):
         step = self.find('应用 Re-Kernel')
         script = step['run']
+        self.assertEqual(step['env']['GH_TOKEN'], '${{ github.token }}')
         self.assertEqual(step['if'], 'inputs.use_rekernel')
         self.assertTrue(script.startswith('set -euo pipefail\n'))
         self.assertIn('TMP_REKERNEL="$RUNNER_TEMP/rekernel-source"', script)

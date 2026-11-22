@@ -1,12 +1,15 @@
 """Real shallow sparse checkouts and interrupted official Re-Kernel transfers."""
 from contextlib import redirect_stderr, redirect_stdout
+from http.client import IncompleteRead
 import io
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import unittest
 from unittest import mock
+from urllib.error import HTTPError, URLError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -40,6 +43,8 @@ class ReKernelSourceTests(unittest.TestCase):
         self.reference = snapshot.git(self.upstream, 'rev-parse', 'HEAD')
         self.output = self.root / 'downloaded'
         self.calls = []
+        # Existing Git regressions must never reach the real public API.
+        self.api = self.enterContext(mock.patch.object(source, 'api_head', return_value=None))
 
     def commit(self):
         snapshot.git(self.upstream, 'add', '.')
@@ -161,6 +166,33 @@ class ReKernelSourceTests(unittest.TestCase):
         self.assertEqual(self.reference, self.download(intermittent))
         self.assertEqual(3, len(calls))
 
+    def test_stalled_git_head_uses_api_and_pins_fetch_after_upstream_moves(self):
+        self.api.return_value = self.reference
+        original = self.reference
+
+        def interrupted(directory, *args, **kwargs):
+            if 'ls-remote' in args:
+                (self.upstream / 'LKM-Source/rekernel_main.c').write_text('new upstream\n', encoding='utf-8')
+                self.commit()
+                raise snapshot.GitCommandError('ls-remote', timeout=45)
+            return self.transport(directory, *args, **kwargs)
+
+        self.assertEqual(original, self.download(interrupted))
+        self.api.assert_called_once()
+        self.assertEqual(original, snapshot.git(self.output, 'rev-parse', 'HEAD'))
+        self.assertNotEqual(original, snapshot.git(self.upstream, 'rev-parse', 'HEAD'))
+        self.assertIn('original real Git fixture',
+                      (self.output / 'LKM-Source/rekernel_main.c').read_text(encoding='utf-8'))
+
+    def test_permanent_git_failure_never_uses_api(self):
+        with mock.patch.object(source, 'git', side_effect=snapshot.GitCommandError(
+                'ls-remote', category='authentication failure', returncode=128)), \
+                mock.patch.object(source.time, 'sleep'):
+            with self.assertRaisesRegex(snapshot.SnapshotError, 'after three attempts'):
+                source.download_source(self.output)
+        self.api.assert_not_called()
+        self.assert_no_partial_output()
+
     def test_missing_or_empty_required_driver_does_not_retry_or_publish(self):
         for mutation in ('missing', 'empty'):
             with self.subTest(mutation=mutation):
@@ -250,6 +282,95 @@ class ReKernelSourceTests(unittest.TestCase):
         self.assertNotIn('fake-secret-token', combined)
         self.assertIn('after three attempts', combined)
         self.assert_no_partial_output()
+
+
+class ReKernelHeadApiTests(unittest.TestCase):
+    def setUp(self):
+        self.reference = 'a' * 40
+        self.opener = self.enterContext(mock.patch.object(source, 'build_opener')).return_value
+        self.response = self.opener.open.return_value.__enter__.return_value
+        self.response.status = 200
+        self.response.geturl.return_value = source.API_HEAD
+        self.response.read.return_value = json.dumps([
+            {'sha': self.reference, 'url': source.API_COMMITS + '/' + self.reference}]).encode()
+        self.enterContext(mock.patch.object(source.time, 'monotonic', return_value=10.0))
+        self.enterContext(mock.patch.dict(source.os.environ, {'GH_TOKEN': '', 'GITHUB_TOKEN': ''}))
+
+    def test_fixed_public_api_identity_and_no_redirect_or_credentials(self):
+        self.assertEqual(self.reference, source.api_head(300.0))
+        request = self.opener.open.call_args.args[0]
+        self.assertEqual(source.API_HEAD, request.full_url)
+        self.assertFalse(request.has_header('Authorization'))
+        self.assertEqual(20, self.opener.open.call_args.kwargs['timeout'])
+        self.response.read.assert_called_once_with(source.MAX_HEAD_RESPONSE + 1)
+        self.assertIsNone(source._NoRedirect().redirect_request(None, None, 302, '', {},
+                                                               'https://example.invalid/'))
+
+    def test_malformed_or_other_repository_commit_is_not_accepted(self):
+        for rows in ([], {}, [None], [{'sha': 'bad', 'url': 'secret'}],
+                     [{'sha': self.reference, 'url': 'https://example.invalid/secret'}]):
+            with self.subTest(rows=rows):
+                self.response.read.return_value = json.dumps(rows).encode()
+                with self.assertRaises(snapshot.SnapshotError):
+                    source.api_head(300.0)
+
+    def test_workflow_token_is_sent_only_to_fixed_api_and_never_logged(self):
+        with mock.patch.dict(source.os.environ, {'GH_TOKEN': 'test-workflow-token'}), \
+                redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(self.reference, source.api_head(300.0))
+        request = self.opener.open.call_args.args[0]
+        self.assertEqual(source.API_HEAD, request.full_url)
+        self.assertEqual('Bearer test-workflow-token', request.get_header('Authorization'))
+        self.assertNotIn('test-workflow-token', output.getvalue())
+
+    def test_token_with_control_characters_is_rejected_before_network(self):
+        with mock.patch.dict(source.os.environ, {'GH_TOKEN': 'secret\r\nInjected: header'}):
+            with self.assertRaisesRegex(snapshot.SnapshotError, 'Invalid authentication'):
+                source.api_head(300.0)
+        self.opener.open.assert_not_called()
+
+    def test_oversized_invalid_json_and_redirected_response_fail_closed(self):
+        for raw in (b'x' * (source.MAX_HEAD_RESPONSE + 1), b'{not json', b'\xff'):
+            with self.subTest(raw_size=len(raw)):
+                self.response.read.return_value = raw
+                with self.assertRaises(snapshot.SnapshotError):
+                    source.api_head(300.0)
+        self.response.geturl.return_value = 'https://example.invalid/'
+        with self.assertRaisesRegex(snapshot.SnapshotError, 'unexpected response'):
+            source.api_head(300.0)
+
+    def test_transient_http_or_network_failure_retains_git_retries_without_raw_error(self):
+        errors = [HTTPError(source.API_HEAD, code, 'fake-secret', {}, None)
+                  for code in (408, 429, 500, 503)]
+        errors += [HTTPError(source.API_HEAD, 403, 'fake-secret',
+                             {'X-RateLimit-Remaining': '0'}, None), URLError('fake-secret'), TimeoutError('fake-secret')]
+        for error in errors:
+            with self.subTest(error=type(error).__name__), redirect_stdout(io.StringIO()) as output:
+                self.opener.open.side_effect = error
+                self.assertIsNone(source.api_head(300.0))
+                self.assertNotIn('fake-secret', output.getvalue())
+
+    def test_permanent_http_errors_never_return_a_commit_or_raw_error(self):
+        for code in (301, 302, 401, 403, 404, 422):
+            with self.subTest(code=code):
+                self.opener.open.side_effect = HTTPError(source.API_HEAD, code, 'fake-secret', {}, None)
+                with self.assertRaisesRegex(snapshot.SnapshotError, f'HTTP {code}') as found:
+                    source.api_head(300.0)
+                self.assertNotIn('fake-secret', str(found.exception))
+
+    def test_interrupted_response_body_retains_git_retries_and_does_not_expose_partial_data(self):
+        self.response.read.side_effect = IncompleteRead(b'fake-secret-partial-body', 20)
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertIsNone(source.api_head(300.0))
+        self.assertNotIn('fake-secret', output.getvalue())
+
+    def test_deadline_is_shared_and_api_not_called_after_expiry(self):
+        self.assertEqual(self.reference, source.api_head(13.0))
+        self.assertEqual(3, self.opener.open.call_args.kwargs['timeout'])
+        self.opener.open.reset_mock()
+        with self.assertRaisesRegex(snapshot.SnapshotError, 'five-minute deadline'):
+            source.api_head(10.0)
+        self.opener.open.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -54,6 +54,10 @@ class GitCommandError(SnapshotError):
                  http_status=None, timeout=None):
         operation = operation if operation in GIT_OPERATIONS else 'command'
         category = category if category in GIT_FAILURE_CATEGORIES else 'unclassified Git failure'
+        self.transient = (timeout is not None or category in {
+            'GitLab server load', 'DNS resolution', 'connection failure', 'network timeout'}
+            or (category == 'HTTP error' and type(http_status) is int
+                and (http_status in (408, 429) or 500 <= http_status <= 599)))
         if timeout is not None:
             limit = f' after {timeout}s' if type(timeout) is int and 0 < timeout <= 86400 else ''
             message = f'Source Git {operation} could not complete (timeout{limit})'
