@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
-"""Delete current-run staging artifacts only after raw files match the public Release."""
+"""Clean verified build transfers while retaining original APKs and Release assets."""
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 import os
 import re
 import sys
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from cleanup_workflow_runs import CleanupError, prebuild_inventory
+from manager_lkm_jobs import KMIS
+from manager_variants import MANAGERS
 
-class CleanupError(RuntimeError):
-    pass
+
+PREBUILD_PATH = '.github/workflows/prebuild-manager-apks.yml'
+PREBUILD_API = '/actions/workflows/prebuild-manager-apks.yml'
+PREBUILD_RECORD = '记录已验证的官方版本状态'
+PREBUILD_EVENTS = ('push', 'schedule', 'workflow_run', 'workflow_dispatch')
+INTERNAL_NATIVE = re.compile(
+    r'internal-manager-native-(?:' + '|'.join(map(re.escape, MANAGERS))
+    + r')-[0-9a-f]{40}-[0-9a-f]{24}-(?:' + '|'.join(map(re.escape, KMIS))
+    + r')-[0-9a-f]{16}-[0-9a-f]{64}\Z')
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -115,14 +127,111 @@ def cleanup(run_id: str, release_tag: str | None = None, source_sha: str | None 
     return deleted
 
 
+def prebuild_run(repository: str, run_id: str, source_sha: str, workflow_id: int,
+                 *, completed: bool, attempt: int | None = None) -> dict:
+    run = api(repository, '/actions/runs/' + run_id)
+    identity = run.get('repository') if isinstance(run, dict) else None
+    origin = run.get('head_repository') if isinstance(run, dict) else None
+    if (not isinstance(run, dict) or type(run.get('id')) is not int or run['id'] != int(run_id)
+            or type(run.get('workflow_id')) is not int or run['workflow_id'] != workflow_id or run.get('path') != PREBUILD_PATH
+            or run.get('head_sha') != source_sha or run.get('head_branch') != 'main'
+            or run.get('event') not in PREBUILD_EVENTS
+            or type(run.get('run_attempt')) is not int or run['run_attempt'] <= 0
+            or (attempt is not None and run['run_attempt'] != attempt)
+            or not isinstance(identity, dict) or not isinstance(origin, dict)
+            or identity.get('full_name') != repository or origin.get('full_name') != repository
+            or type(identity.get('id')) is not int or identity['id'] <= 0
+            or type(origin.get('id')) is not int or origin['id'] != identity['id']):
+        raise CleanupError('Prebuild run workflow, repository, attempt or source identity does not match')
+    if completed:
+        valid = run.get('status') == 'completed' and run.get('conclusion') == 'success'
+    else:
+        valid = run.get('status') == 'in_progress' and run.get('conclusion') is None
+    if not valid:
+        raise CleanupError('Prebuild cleanup requires a successful completed run or its active final recorder')
+    return run
+
+
+def cleanup_prebuild(run_id: str, *, repository: str | None = None, source_sha: str | None = None,
+                     completed: bool = False, execute: bool = False) -> list[str]:
+    """Remove only same-run native transfers after every APK consumer succeeds."""
+    repository = repository or os.environ.get('GITHUB_REPOSITORY', '')
+    source_sha = source_sha or os.environ.get('GITHUB_SHA', '')
+    if (not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repository)
+            or not isinstance(run_id, str) or not re.fullmatch(r'[1-9][0-9]*', run_id)
+            or not re.fullmatch(r'[0-9a-f]{40}', source_sha)):
+        raise CleanupError('Expected an exact prebuild repository, run ID and source SHA')
+    attempt = None
+    if not completed:
+        if (repository != os.environ.get('GITHUB_REPOSITORY') or source_sha != os.environ.get('GITHUB_SHA')
+                or run_id != os.environ.get('GITHUB_RUN_ID')
+                or os.environ.get('GITHUB_JOB') != 'record-manager-prebuild'
+                or not re.fullmatch(r'[1-9][0-9]*', os.environ.get('GITHUB_RUN_ATTEMPT', ''))):
+            raise CleanupError('Active prebuild cleanup may only run inside its current final recorder')
+        attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
+    workflow = api(repository, PREBUILD_API)
+    if (not isinstance(workflow, dict) or workflow.get('path') != PREBUILD_PATH
+            or type(workflow.get('id')) is not int or workflow['id'] <= 0):
+        raise CleanupError('Could not confirm the exact manager prebuild workflow')
+    run = prebuild_run(repository, run_id, source_sha, workflow['id'], completed=completed, attempt=attempt)
+    attempt = run['run_attempt']
+    client = SimpleNamespace(request=partial(api, repository))
+    jobs = prebuild_inventory(client, f'/actions/runs/{run_id}/attempts/{attempt}/jobs', 'jobs')
+    apks = [job for job in jobs if job['name'].endswith(' · 预编译管理器 APK')]
+    if not apks or any(job.get('status') != 'completed' or job.get('conclusion') != 'success' for job in apks):
+        raise CleanupError('Every prebuild APK consumer must finish successfully before native cleanup')
+    if not completed and sum(job['name'] == PREBUILD_RECORD for job in jobs) != 1:
+        raise CleanupError('Current prebuild final recorder is missing or duplicated')
+    for job in jobs:
+        if type(job.get('run_id')) is not int or job['run_id'] != int(run_id):
+            raise CleanupError('Prebuild job belongs to a different run')
+        if not completed and job['name'] == PREBUILD_RECORD:
+            if job.get('status') == 'in_progress' and job.get('conclusion') is None:
+                continue
+        if job.get('status') != 'completed' or job.get('conclusion') not in ('success', 'skipped'):
+            raise CleanupError('Prebuild consumers are unfinished or failed; native artifacts preserved')
+    artifacts = prebuild_inventory(client, f'/actions/runs/{run_id}/artifacts', 'artifacts')
+    staging = [item for item in artifacts if INTERNAL_NATIVE.fullmatch(item['name'])]
+    for item in staging:
+        origin = item.get('workflow_run')
+        if (not isinstance(origin, dict) or type(origin.get('id')) is not int or origin['id'] != int(run_id)
+                or origin.get('head_sha') != source_sha or origin.get('head_branch') != 'main'
+                or type(origin.get('repository_id')) is not int or origin['repository_id'] != run['repository']['id']
+                or type(origin.get('head_repository_id')) is not int or origin['head_repository_id'] != run['repository']['id']
+                or item.get('expired') is not False
+                or type(item.get('size_in_bytes')) is not int or item['size_in_bytes'] <= 0
+                or not isinstance(item.get('digest'), str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', item['digest'])):
+            raise CleanupError('Internal native artifact provenance is invalid; no artifacts deleted')
+    prebuild_run(repository, run_id, source_sha, workflow['id'], completed=completed, attempt=attempt)
+    for item in staging:
+        if execute:
+            api(repository, f'/actions/artifacts/{item["id"]}', method='DELETE')
+    names = [item['name'] for item in staging]
+    print(json.dumps({'run_id': run_id, 'mode': 'execute' if execute else 'dry-run',
+                      'deleted_internal' if execute else 'internal_candidates': names}, ensure_ascii=False))
+    return names
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--release-tag')
     parser.add_argument('--source-sha')
+    parser.add_argument('--prebuild-internal', action='store_true')
+    parser.add_argument('--completed-run', action='store_true')
+    parser.add_argument('--repo')
+    parser.add_argument('--execute', action='store_true')
     args = parser.parse_args(argv)
     try:
-        cleanup(args.run_id, args.release_tag, args.source_sha)
+        if args.prebuild_internal:
+            if args.release_tag or (args.completed_run and (not args.repo or not args.source_sha)):
+                raise CleanupError('Completed prebuild cleanup requires an explicit repository and source SHA')
+            cleanup_prebuild(args.run_id, repository=args.repo, source_sha=args.source_sha,
+                             completed=args.completed_run, execute=args.execute)
+        else:
+            if args.completed_run or args.repo or args.execute:
+                raise CleanupError('Prebuild options require --prebuild-internal')
+            cleanup(args.run_id, args.release_tag, args.source_sha)
     except (CleanupError, KeyError, TypeError) as error:
         print('Artifact cleanup failed: ' + str(error), file=sys.stderr)
         return 1

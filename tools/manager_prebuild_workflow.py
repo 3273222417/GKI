@@ -6,6 +6,7 @@ from reusable_manager_apk import RECIPE_INPUTS, RECIPE_PATTERNS
 
 
 OUTPUT = '.github/workflows/prebuild-manager-apks.yml'
+NAME = '自动预编译管理器 APK'
 STATE_FILE = '${{ runner.temp }}/' + STATE_ARTIFACT
 STATE_PREFIX = 'gki-manager-apk-observations-v4-'
 STATE_KEY = STATE_PREFIX + '${{ github.run_id }}-${{ github.run_attempt }}'
@@ -33,7 +34,7 @@ def record_job() -> dict:
         'needs': ['check-upstream', 'prebuild-manager-apks'],
         'if': f"always() && !cancelled() && ({recorded})",
         'runs-on': 'ubuntu-24.04',
-        'timeout-minutes': 4,
+        'timeout-minutes': 8,
         'permissions': {'contents': 'read', 'actions': 'write'},
         'steps': [
             {'name': '检出验证工具', 'uses': 'actions/checkout@v6',
@@ -47,6 +48,12 @@ def record_job() -> dict:
             {'name': '保存成功版本记录', 'uses': 'actions/cache/save@v5',
              'continue-on-error': True,
              'with': {'path': STATE_FILE, 'key': STATE_KEY}},
+            {'name': '清理已被安装包使用的临时原生附件',
+             'if': "needs.prebuild-manager-apks.result == 'success'",
+             'continue-on-error': True, 'timeout-minutes': 4,
+             'env': {'GH_TOKEN': '${{ github.token }}'},
+             'run': 'python3 tools/cleanup_build_artifacts.py --run-id "$GITHUB_RUN_ID" '
+                    '--prebuild-internal --execute'},
         ],
     }
 
@@ -73,7 +80,7 @@ def prebuild_workflow(base: dict) -> dict:
                 '--artifact-history-branch "$DEFAULT_BRANCH"'},
         ],
     }
-    return {'name': '自动预编译管理器 APK',
+    return {'name': NAME, 'run-name': NAME,
             'on': {'workflow_dispatch': {},
                    'workflow_run': {'workflows': [UPDATER_NAME], 'types': ['completed'], 'branches': ['main']},
                    'push': {'branches': ['main'], 'paths': list(dict.fromkeys(

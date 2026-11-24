@@ -102,5 +102,188 @@ class ArtifactCleanupTests(unittest.TestCase):
             self.assertEqual(len(cleanup.cleanup('123')), 3)
 
 
+class PrebuildArtifactCleanupTests(unittest.TestCase):
+    def setUp(self):
+        self.run = {'id': 123, 'workflow_id': 77, 'path': cleanup.PREBUILD_PATH,
+                    'head_sha': SHA, 'head_branch': 'main', 'event': 'workflow_dispatch',
+                    'run_attempt': 1, 'status': 'in_progress', 'conclusion': None,
+                    'repository': {'id': 12, 'full_name': 'owner/gki'},
+                    'head_repository': {'id': 12, 'full_name': 'owner/gki'}}
+        self.workflow = {'id': 77, 'path': cleanup.PREBUILD_PATH}
+        self.jobs = [self.job(11, 'BakaSU · 最新版 · 预编译管理器 APK'),
+                     self.job(12, 'SukiSU · 正式版 · 预编译管理器 APK'),
+                     self.job(13, 'BakaSU · 原生模块'),
+                     self.job(14, cleanup.PREBUILD_RECORD, status='in_progress', conclusion=None)]
+        self.internal = 'internal-manager-native-BakaSU-' + SHA + '-' + 'b' * 24 + '-android16-6.12-' + 'c' * 16 + '-' + 'd' * 64
+        self.artifacts = [self.artifact(21, self.internal), self.artifact(22, ASSETS[0]['name']),
+                          self.artifact(23, 'gki-manager-apk-observations.json'),
+                          self.artifact(24, 'SHA256SUMS.txt'), self.artifact(25, 'Release-manager'),
+                          self.artifact(26, self.internal + '.apk'),
+                          self.artifact(27, self.internal.replace('BakaSU-', 'unknown-'))]
+        self.calls, self.deleted = [], []
+        environment = patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/gki', 'GITHUB_RUN_ID': '123',
+                                              'GITHUB_SHA': SHA, 'GITHUB_RUN_ATTEMPT': '1',
+                                              'GITHUB_JOB': 'record-manager-prebuild'})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def job(self, identifier, name, *, status='completed', conclusion='success'):
+        return {'id': identifier, 'name': name, 'run_id': 123, 'status': status, 'conclusion': conclusion}
+
+    def artifact(self, identifier, name):
+        return {'id': identifier, 'name': name, 'expired': False, 'size_in_bytes': 123,
+                'digest': 'sha256:' + 'e' * 64,
+                'workflow_run': {'id': 123, 'head_sha': SHA, 'head_branch': 'main',
+                                 'repository_id': 12, 'head_repository_id': 12}}
+
+    def api(self, repository, resource, *, method='GET'):
+        self.assertEqual('owner/gki', repository)
+        self.calls.append((method, resource))
+        if method == 'DELETE':
+            self.assertRegex(resource, r'^/actions/artifacts/[0-9]+$')
+            self.deleted.append(resource)
+        elif resource == cleanup.PREBUILD_API:
+            return self.workflow
+        elif resource == '/actions/runs/123':
+            return copy.deepcopy(self.run)
+        elif resource.startswith('/actions/runs/123/attempts/1/jobs?'):
+            return {'total_count': len(self.jobs), 'jobs': self.jobs}
+        elif resource.startswith('/actions/runs/123/artifacts?'):
+            return {'total_count': len(self.artifacts), 'artifacts': self.artifacts}
+        else:
+            self.fail('Unexpected API access ' + resource)
+
+    def invoke(self, **options):
+        with patch.object(cleanup, 'api', side_effect=self.api), contextlib.redirect_stdout(io.StringIO()):
+            return cleanup.cleanup_prebuild('123', **options)
+
+    def complete(self):
+        self.run.update(status='completed', conclusion='success')
+        self.jobs[-1].update(status='completed', conclusion='success')
+
+    def test_preview_and_cleanup_preserve_apks_records_and_unrelated_attachments(self):
+        self.assertEqual([self.internal], self.invoke())
+        self.assertEqual([], self.deleted)
+        self.assertEqual([self.internal], self.invoke(execute=True))
+        self.assertEqual(['/actions/artifacts/21'], self.deleted)
+
+    def test_completed_run_requires_matching_successful_prebuild_identity(self):
+        self.complete()
+        self.assertEqual([self.internal], self.invoke(repository='owner/gki', source_sha=SHA, completed=True, execute=True))
+        self.assertEqual(['/actions/artifacts/21'], self.deleted)
+
+    def test_running_failed_or_cancelled_historical_runs_preserve_all_attachments(self):
+        for status, conclusion in (('in_progress', None), ('completed', 'failure'), ('completed', 'cancelled')):
+            self.run.update(status=status, conclusion=conclusion)
+            with self.subTest(status=status, conclusion=conclusion), self.assertRaises(cleanup.CleanupError):
+                self.invoke(completed=True, execute=True)
+            self.assertEqual([], self.deleted)
+
+    def test_wrong_workflow_source_repository_attempt_or_branch_preserves_everything(self):
+        original = copy.deepcopy(self.run)
+        for changes in ({'path': '.github/workflows/kernel-full-feature-matrix.yml'}, {'workflow_id': 78},
+                        {'head_sha': 'f' * 40}, {'head_branch': 'other'}, {'run_attempt': 2},
+                        {'head_repository': {'id': 13, 'full_name': 'fork/gki'}}, {'id': 456}):
+            self.run = {**original, **changes}
+            with self.subTest(changes=changes), self.assertRaises(cleanup.CleanupError):
+                self.invoke(execute=True)
+            self.assertEqual([], self.deleted)
+        self.run = original
+        self.workflow['path'] = '.github/workflows/kernel-full-feature-matrix.yml'
+        with self.assertRaises(cleanup.CleanupError):
+            self.invoke(execute=True)
+        self.assertEqual([], self.deleted)
+
+    def test_failed_unfinished_or_missing_apk_consumers_cannot_unlock_cleanup(self):
+        original = copy.deepcopy(self.jobs)
+        for replacement in (self.job(11, original[0]['name'], conclusion='failure'),
+                            self.job(11, original[0]['name'], status='in_progress', conclusion=None),
+                            self.job(11, 'unrecognized worker')):
+            self.jobs = [replacement, *copy.deepcopy(original[1:])]
+            if replacement['name'] == 'unrecognized worker':
+                self.jobs[1]['name'] = 'another unrecognized worker'
+            with self.subTest(replacement=replacement), self.assertRaises(cleanup.CleanupError):
+                self.invoke(execute=True)
+            self.assertEqual([], self.deleted)
+
+    def test_running_cleanup_requires_the_current_final_recorder(self):
+        with patch.dict(os.environ, {'GITHUB_JOB': 'prebuild-manager-native'}), \
+                patch.object(cleanup, 'api') as api, self.assertRaises(cleanup.CleanupError):
+            cleanup.cleanup_prebuild('123', execute=True)
+        api.assert_not_called()
+
+    def test_attachment_provenance_and_inventory_are_verified_before_first_delete(self):
+        original = copy.deepcopy(self.artifacts)
+        for changes in ({'workflow_run': {**original[0]['workflow_run'], 'id': 456}},
+                        {'workflow_run': {**original[0]['workflow_run'], 'head_sha': 'f' * 40}},
+                        {'digest': 'bad'}, {'expired': True}, {'size_in_bytes': False}):
+            self.artifacts = [{**original[0], **changes}, *copy.deepcopy(original[1:])]
+            with self.subTest(changes=changes), self.assertRaises(cleanup.CleanupError):
+                self.invoke(execute=True)
+            self.assertEqual([], self.deleted)
+        self.artifacts = original + [copy.deepcopy(original[0])]
+        with self.assertRaises(cleanup.CleanupError):
+            self.invoke(execute=True)
+        self.assertEqual([], self.deleted)
+
+    def test_complete_pagination_is_required_before_deleting_second_page_candidates(self):
+        original = self.api
+        fillers = [self.artifact(100 + index, 'diagnostic-' + str(index)) for index in range(100)]
+        def pages(repository, resource, *, method='GET'):
+            if '/artifacts?' in resource:
+                batch = fillers if resource.endswith('page=1') else self.artifacts
+                return {'total_count': 107, 'artifacts': batch}
+            return original(repository, resource, method=method)
+        with patch.object(cleanup, 'api', side_effect=pages), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual([self.internal], cleanup.cleanup_prebuild('123', execute=True))
+        self.assertEqual(['/actions/artifacts/21'], self.deleted)
+        self.deleted.clear()
+        self.artifacts.pop()
+        with patch.object(cleanup, 'api', side_effect=pages), self.assertRaises(cleanup.CleanupError):
+            cleanup.cleanup_prebuild('123', execute=True)
+        self.assertEqual([], self.deleted)
+
+    def test_changed_attempt_before_deletion_preserves_every_attachment(self):
+        original = self.api
+        reads = 0
+        def changed(repository, resource, *, method='GET'):
+            nonlocal reads
+            if resource == '/actions/runs/123':
+                reads += 1
+                if reads == 2:
+                    self.run['run_attempt'] = 2
+            return original(repository, resource, method=method)
+        with patch.object(cleanup, 'api', side_effect=changed), self.assertRaises(cleanup.CleanupError):
+            cleanup.cleanup_prebuild('123', execute=True)
+        self.assertEqual([], self.deleted)
+
+    def test_only_complete_native_transfer_names_match(self):
+        for variant in cleanup.MANAGERS:
+            for kmi in cleanup.KMIS:
+                name = 'internal-manager-native-' + variant + '-' + SHA + '-' + 'b' * 24 + '-' + kmi + '-' + 'c' * 16 + '-' + 'd' * 64
+                self.assertIsNotNone(cleanup.INTERNAL_NATIVE.fullmatch(name))
+        for name in (self.internal.replace('b' * 24, 'b' * 16), self.internal + '.zip',
+                     self.internal.replace('c' * 16, 'C' * 16), self.internal.replace('android16-6.12', 'android18-6.19')):
+            with self.subTest(name=name):
+                self.assertIsNone(cleanup.INTERNAL_NATIVE.fullmatch(name))
+
+    def test_completed_cli_requires_explicit_repository_and_sha(self):
+        for arguments in ([], ['--repo', 'owner/gki'], ['--source-sha', SHA]):
+            with self.subTest(arguments=arguments), patch.object(cleanup, 'api') as api, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(1, cleanup.main(['--run-id', '123', '--prebuild-internal', '--completed-run', *arguments]))
+            api.assert_not_called()
+
+    def test_cleanup_is_after_record_archive_and_only_for_successful_apk_matrix(self):
+        from manager_prebuild_workflow import record_job
+        job = record_job()
+        step = job['steps'][-1]
+        self.assertEqual("needs.prebuild-manager-apks.result == 'success'", step['if'])
+        self.assertIn('--prebuild-internal --execute', step['run'])
+        self.assertTrue(step['continue-on-error'])
+        self.assertLess(next(index for index, item in enumerate(job['steps'])
+                             if item.get('uses') == 'actions/upload-artifact@v7'), len(job['steps']) - 1)
+
+
 if __name__ == '__main__':
     unittest.main()

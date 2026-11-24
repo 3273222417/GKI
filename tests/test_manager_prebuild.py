@@ -263,6 +263,7 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertNotIn('prebuild-managers', updater['jobs'])
         self.assertEqual(updater['on']['schedule'], [{'cron': '0 4,16 * * *'}])
         workflow = prebuild_workflow(create_workflow(ROOT))
+        self.assertEqual(workflow['run-name'], '自动预编译管理器 APK')
         self.assertEqual(set(workflow['on']), {'workflow_run', 'push', 'workflow_dispatch'})
         self.assertEqual(workflow['on']['workflow_dispatch'], {})
         self.assertEqual(workflow['on']['workflow_run'], {'workflows': [updater['name']],
@@ -300,10 +301,14 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertIn("prebuild-manager-apks.result == 'success'", recorder['if'])
         self.assertIn("prebuild-manager-apks.result == 'skipped'", recorder['if'])
         self.assertIn("manager_prebuild_state_changed == 'true'", recorder['if'])
-        self.assertEqual(recorder['steps'][-1]['with']['key'], STATE_KEY)
-        self.assertEqual(recorder['steps'][-2]['uses'], 'actions/upload-artifact@v7')
-        self.assertEqual(recorder['steps'][-2]['with']['path'], '${{ runner.temp }}/' + STATE_ARTIFACT)
-        self.assertFalse(recorder['steps'][-2]['with']['archive'])
+        archive, cache, cleanup = recorder['steps'][-3:]
+        self.assertEqual(cache['with']['key'], STATE_KEY)
+        self.assertEqual(archive['uses'], 'actions/upload-artifact@v7')
+        self.assertEqual(archive['with']['path'], '${{ runner.temp }}/' + STATE_ARTIFACT)
+        self.assertFalse(archive['with']['archive'])
+        self.assertEqual(cleanup['if'], "needs.prebuild-manager-apks.result == 'success'")
+        self.assertIn('--prebuild-internal --execute', cleanup['run'])
+        self.assertTrue(cleanup['continue-on-error'])
 
     def test_every_slot_publishes_the_ddk_lock_used_to_restore_all_native_modules(self):
         jobs = prebuild_workflow(create_workflow(ROOT))['jobs']
