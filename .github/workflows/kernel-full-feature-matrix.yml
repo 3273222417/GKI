@@ -180,7 +180,7 @@ jobs:
       env:
         KSU_TIER: ${{ inputs.kernelsu_branch }}
         CUSTOM_REF: ${{ vars.KSU_CUSTOM_REF }}
-        ENABLE_SUSFS: ${{ inputs.enable_susfs }}
+        ENABLE_SUSFS: ${{ inputs.operation == '仅编译管理器安装包' && 'false' || inputs.enable_susfs }}
         GH_TOKEN: ${{ github.token }}
         MANAGER_SELECTION: ${{ inputs.kernelsu_variant }}
       run: |-

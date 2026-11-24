@@ -192,6 +192,9 @@ class CombinedReleaseWorkflowTests(unittest.TestCase):
             self.assertIn('tools/resolve_manager_selection.py --selection', step['run'])
             self.assertEqual('${{ inputs.kernelsu_variant }}', step['env']['MANAGER_SELECTION'])
             self.assertEqual('' if oplus else '${{ vars.KSU_CUSTOM_REF }}', step['env']['CUSTOM_REF'])
+            self.assertEqual('${{ inputs.enable_susfs }}' if oplus else
+                             "${{ inputs.operation == '仅编译管理器安装包' && 'false' || inputs.enable_susfs }}",
+                             step['env']['ENABLE_SUSFS'])
             prepare = workflow['jobs']['prepare-matrix']
             source = next(step for step in prepare['steps'] if step.get('id') == 'sources')
             self.assertEqual('python3 tools/resolve_manager_selection.py --source-for "$KSU_VARIANT"', source['run'])

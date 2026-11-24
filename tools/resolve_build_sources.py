@@ -273,7 +273,8 @@ def source_result(commit: str, repository: str, source_branch: str, tier: str) -
             "ksu_source_branch": source_branch, "effective_ksu_branch": tier}
 
 
-def resolve_sources(root: Path, variant: str, tier: str, custom_ref: str = "", susfs: bool = False) -> dict[str, str]:
+def resolve_sources(root: Path, variant: str, tier: str, custom_ref: str = "", susfs: bool = False,
+                    *, live_channel: bool = False) -> dict[str, str]:
     from manager_variants import ADDITIONAL_MANAGERS
     if variant in ADDITIONAL_MANAGERS:
         from additional_manager_integration import effective_susfs
@@ -291,7 +292,7 @@ def resolve_sources(root: Path, variant: str, tier: str, custom_ref: str = "", s
         return source_result("", "", "", tier)
     repository = REPOSITORIES[variant]
     from approved_manager_builds import LATEST, STABLE, read_approved
-    if tier in (STABLE, LATEST):
+    if tier in (STABLE, LATEST) and not live_channel:
         try:
             channels = read_approved(root)['KernelSU' if variant == 'Official' else variant]
         except (OSError, ValueError) as error:

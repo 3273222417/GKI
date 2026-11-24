@@ -104,6 +104,35 @@ class ManagerSelectionTests(unittest.TestCase):
                 selection.resolve_selection(COMBINED_SELECTION, '正式版')
         self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
 
+    def test_latest_without_susfs_uses_same_official_source_as_prebuild(self):
+        repository = sources.REPOSITORIES['KernelSU-Next']
+        official = 'f' * 40
+        with patch('approved_manager_builds.read_approved') as approved, \
+                patch.object(sources, 'official_selection', return_value=(official, 'dev')) as lookup:
+            receipt = selection.resolve_selection('KernelSU-Next', '最新版')
+        approved.assert_not_called()
+        lookup.assert_called_once_with(repository, LATEST, '')
+        self.assertEqual(receipt['sources']['KernelSU-Next'], source('KernelSU-Next', LATEST, official, 'dev'))
+
+    def test_live_combined_latest_uses_the_current_official_stable_for_skipping(self):
+        duplicate = 'e' * 40
+        nova = sources.REPOSITORIES['SukiSU']
+        baka = sources.REPOSITORIES['BakaSU']
+
+        def select(repository, tier, custom_ref):
+            if repository == nova:
+                return duplicate, 'main' if tier == LATEST else 'v1.1'
+            if repository == baka and tier == STABLE:
+                raise sources.NoStableRelease('No published stable')
+            return ('f' if tier == LATEST else 'c') * 40, 'dev' if tier == LATEST else 'v1.0'
+
+        with patch('approved_manager_builds.read_approved') as approved, \
+                patch.object(sources, 'official_selection', side_effect=select):
+            receipt = selection.resolve_selection(COMBINED_SELECTION, '最新版')
+        approved.assert_not_called()
+        self.assertEqual(receipt['active_managers'], ['BakaSU', 'KernelSU-Next'])
+        self.assertEqual(receipt['skipped_managers'][0]['stable_source']['ksu_ref'], duplicate)
+
     def test_receipt_rejects_forged_subsets_sources_and_skip_reasons(self):
         original = resolve(missing=('BakaSU',))
         invalid = []

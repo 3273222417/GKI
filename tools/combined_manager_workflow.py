@@ -54,11 +54,14 @@ def outputs_by_manager(outputs):
             for variant in MANAGERS for key, value in outputs.items()}
 
 
-def selected_manager_job(original_prepare):
+def selected_manager_job(original_prepare, *, oplus):
     """Resolve every selected source once, before scheduling expensive work."""
     original_sources = next(step for step in original_prepare['steps'] if step.get('id') == 'sources')
     environment = {key: value for key, value in original_sources['env'].items() if key != 'KSU_VARIANT'}
     environment['MANAGER_SELECTION'] = '${{ inputs.kernelsu_variant }}'
+    if not oplus:
+        environment['ENABLE_SUSFS'] = expression(
+            "inputs.operation == '仅编译管理器安装包' && 'false' || inputs.enable_susfs")
     checkout = next(step for step in original_prepare['steps']
                     if step.get('uses') == 'actions/checkout@v6' and 'repository' not in step.get('with', {}))
     return {
@@ -93,7 +96,7 @@ def add_combined(workflow, *, oplus):
     original_manager = copy.deepcopy(jobs['build-sukisu-manager'])
     # Keep a single lightweight discovery stage. Empty active selections are
     # successful no-op runs, so no empty manager matrix reaches a runner.
-    jobs = {'select-managers': selected_manager_job(original_prepare), **jobs}
+    jobs = {'select-managers': selected_manager_job(original_prepare, oplus=oplus), **jobs}
     root['jobs'] = jobs
     for name in ('prepare-matrix', 'build-sukisu-lkm', 'build-sukisu-manager', kernel_id):
         jobs[name] = scoped(jobs[name])

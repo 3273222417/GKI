@@ -95,10 +95,12 @@ def active_managers(selection, resolution=None):
 def resolve_selection(selection, tier, custom_ref='', susfs=False):
     requested = selected_managers(selection)
     channel = effective_tier(tier)
+    # Full SUSFS builds remain bound to the reviewed manager/SUSFS pairing.
+    lookup = {'live_channel': True} if channel == 'Latest(最新)' and not susfs else {}
     active, skipped, sources = [], [], {}
     for variant in requested:
         try:
-            source = resolve_sources(ROOT, variant, tier, custom_ref, susfs)
+            source = resolve_sources(ROOT, variant, tier, custom_ref, susfs, **lookup)
         except NoStableRelease:
             if len(requested) < 2 or channel != 'Stable(标准)':
                 raise
@@ -106,7 +108,7 @@ def resolve_selection(selection, tier, custom_ref='', susfs=False):
             continue
         if len(requested) > 1 and channel == 'Latest(最新)':
             try:
-                stable = resolve_sources(ROOT, variant, 'Stable(标准)', '', susfs)
+                stable = resolve_sources(ROOT, variant, 'Stable(标准)', '', susfs, **lookup)
             except NoStableRelease:
                 stable = None  # No formal counterpart: keep building latest.
             if stable is not None and source['ksu_ref'] == stable['ksu_ref']:
