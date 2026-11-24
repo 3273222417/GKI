@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Keep published Release runs plus the newest ordinary successful runs.
+"""Remove completed Actions runs according to the repository's retention rules.
 
-The default is a read-only preview retaining two successful non-cleanup runs
-in addition to every run identified by an existing published gki Release.
+The default is a read-only preview. Every run identified by a published
+Release is protected. Ordinary successful runs have no retention slots.
 Release metadata is read only; Release/asset deletion is never allowed.
 Only --execute enables deletion of validated old workflow runs.
 """
@@ -23,8 +23,10 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from release_tags import release_run_identity
 
 DEFAULT_WORKFLOW = 'all'
-DEFAULT_KEEP = 2
+DEFAULT_KEEP = 0
 DEFAULT_EXCLUDE_WORKFLOW = 'cleanup-build-history.yml'
+PREBUILD_WORKFLOW = 'prebuild-manager-apks.yml'
+PREBUILD_DISCOVERY = '确定六种管理器的正式版与最新版'
 CONCLUSIONS = frozenset(('success', 'failure', 'neutral', 'cancelled', 'skipped',
                          'timed_out', 'action_required', 'stale', 'startup_failure'))
 MAX_RESPONSE = 16 * 1024 * 1024
@@ -95,8 +97,10 @@ class GitHub:
             rf'/actions/workflows/{workflow}(?:/runs\?per_page=100&page=[1-9][0-9]*)?', resource)
         repository_listing = re.fullmatch(r'/actions/runs\?per_page=100&page=[1-9][0-9]*', resource)
         releases = re.fullmatch(r'/releases\?per_page=100&page=[1-9][0-9]*', resource)
+        prebuild_evidence = re.fullmatch(
+            r'/actions/runs/[1-9][0-9]*/(?:attempts/1/jobs|artifacts)\?per_page=100&page=1', resource)
         if method not in ('GET', 'DELETE') or not (
-                run_path or (method == 'GET' and (listing or repository_listing or releases))):
+                run_path or (method == 'GET' and (listing or repository_listing or releases or prebuild_evidence))):
             raise CleanupError('Only workflow/run paths and read-only Release listing are allowed')
         request = Request('https://api.github.com/repos/' + self.repository + resource, method=method,
                           headers={'Authorization': 'Bearer ' + self.token,
@@ -275,8 +279,8 @@ def preservation_reason(run, current_run_id=None):
 def plan_runs(runs, *, keep=DEFAULT_KEEP, current_run_id=None, workflow_id=None,
               excluded_workflow_ids=(), release_run_ids=(), protected_workflow_run_ids=()):
     """Release runs are extra protection and never consume ordinary success slots."""
-    if type(keep) is not int or keep < 1:
-        raise CleanupError('At least one successful workflow run must be retained')
+    if type(keep) is not int or keep < 0:
+        raise CleanupError('Successful workflow retention must be a nonnegative integer')
     if not isinstance(runs, list):
         raise CleanupError('Expected a complete list of workflow runs')
     if workflow_id is not None and not positive_id(workflow_id):
@@ -351,9 +355,36 @@ class CleanupReport:
                 'error': self.error}
 
 
-def protected_runs(client, runs, workflow):
+def empty_prebuild(client, run):
+    """Require completed discovery, skipped workers and no artifacts."""
+    if run['status'] != 'completed' or run['conclusion'] != 'success' or run.get('run_attempt') != 1:
+        return False
+    run_path = f"/actions/runs/{run['id']}"
+    try:
+        jobs = client.request(run_path + '/attempts/1/jobs?per_page=100&page=1')
+        if not isinstance(jobs, dict):
+            return False
+        count, rows = jobs.get('total_count'), jobs.get('jobs')
+        if (type(count) is not int or not 2 <= count <= 100 or not isinstance(rows, list) or len(rows) != count
+                or any(not isinstance(job, dict) or job.get('run_id') != run['id']
+                       or job.get('status') != 'completed' or not isinstance(job.get('name'), str) for job in rows)):
+            return False
+        discovery = [job for job in rows if job['name'] == PREBUILD_DISCOVERY]
+        workers = [job for job in rows if job['name'] != PREBUILD_DISCOVERY]
+        if (len(discovery) != 1 or discovery[0].get('conclusion') != 'success'
+                or not any('预编译管理器 APK' in job['name'] for job in workers)
+                or any(job.get('conclusion') != 'skipped' for job in workers)):
+            return False
+        artifacts = client.request(run_path + '/artifacts?per_page=100&page=1')
+        return (isinstance(artifacts, dict) and type(artifacts.get('total_count')) is int
+                and artifacts['total_count'] == 0 and artifacts.get('artifacts') == [])
+    except CleanupError:
+        return False
+
+
+def protected_runs(client, runs, workflow, *, release_ids, current_run_id):
     if workflow is None:
-        return set()
+        return set(), set()
     validate_workflow(workflow)
     if workflow == 'all':
         raise CleanupError('Only one exact APK workflow can be protected')
@@ -362,6 +393,10 @@ def protected_runs(client, runs, workflow):
         raise CleanupError('Protected workflow metadata is missing a valid ID')
     path = f'{client.repository}/.github/workflows/{workflow}'.casefold()
     protected = {run['id'] for run in runs if run['workflow_id'] == metadata['id']}
+    empty = set()
+    if workflow == PREBUILD_WORKFLOW and metadata.get('path') == f'.github/workflows/{PREBUILD_WORKFLOW}':
+        empty = {run['id'] for run in runs if run['id'] in protected and run['id'] not in release_ids
+                 and not preservation_reason(run, current_run_id) and empty_prebuild(client, run)}
     # Preserve bootstrap runs from when the APK workflow ran as a push-only
     # job within the upstream checker. Its pinned path is reported by GitHub.
     for run in runs:
@@ -370,7 +405,8 @@ def protected_runs(client, runs, workflow):
                 isinstance(item, dict) and isinstance(item.get('path'), str)
                 and item['path'].partition('@')[0].casefold() == path for item in references):
             protected.add(run['id'])
-    return protected
+            empty.discard(run['id'])
+    return protected - empty, empty
 
 
 def cleanup(client, workflow=DEFAULT_WORKFLOW, *, keep=DEFAULT_KEEP, current_run_id=None,
@@ -386,8 +422,9 @@ def cleanup(client, workflow=DEFAULT_WORKFLOW, *, keep=DEFAULT_KEEP, current_run
             raise CleanupError('Excluded workflow metadata is missing a valid ID')
         excluded.append(metadata['id'])
     workflow_id, runs = fetch_workflow_runs(client, workflow)
-    protected = protected_runs(client, runs, protect_workflow)
     release_ids = fetch_release_run_ids(client, runs)
+    protected, empty_prebuilds = protected_runs(client, runs, protect_workflow, release_ids=release_ids,
+                                               current_run_id=current_run_id)
     report.plan = plan_runs(runs, keep=keep, current_run_id=current_run_id, workflow_id=workflow_id,
                             excluded_workflow_ids=excluded, release_run_ids=release_ids,
                             protected_workflow_run_ids=protected)
@@ -410,6 +447,8 @@ def cleanup(client, workflow=DEFAULT_WORKFLOW, *, keep=DEFAULT_KEEP, current_run
             # the complete Release inventory immediately before every DELETE;
             # a failed page aborts cleanup rather than using stale protection.
             release_ids.update(fetch_release_run_ids(client, runs))
+            if run_id in empty_prebuilds and run_id not in release_ids and not empty_prebuild(client, current):
+                protected.add(run_id)
             finished = set(report.deleted_ids + report.gone_ids)
             refreshed = plan_runs([run for run in runs if run['id'] not in finished], keep=keep,
                                   current_run_id=current_run_id, workflow_id=workflow_id,
@@ -447,7 +486,7 @@ def write_summary(report, path):
              f'- 已不存在：{len(data["gone_ids"])} 条',
              f'- 剩余候选：{len(data["remaining_candidate_ids"])} 条',
              '- 删除运行记录时，其关联的 Actions 产物也会删除。',
-             '- 所有发行版（Release）及其全部附件均保留，不受两条记录限制。',
+             '- 所有发行版（Release）及其全部附件均保留。',
              '- 发行对应的 Actions 运行也保留；无法确认发行来源或读取发行失败时停止清理。',
              '- 缓存和分支均保留。']
     for label, key in (('保留成功运行 ID', 'kept_ids'), ('保护运行 ID', 'preserved'),
@@ -467,11 +506,11 @@ def main(argv=None):
     parser.add_argument('--workflow', default=DEFAULT_WORKFLOW,
                         help='all repository workflows (default), or one workflow filename/ID')
     parser.add_argument('--keep', type=int, default=DEFAULT_KEEP,
-                        help='ordinary successful non-excluded runs to retain in addition to all published Release runs (default: 2)')
+                        help='ordinary successful non-excluded runs to retain in addition to all published Release runs (default: 0)')
     parser.add_argument('--exclude-workflow', default=DEFAULT_EXCLUDE_WORKFLOW,
                         help='maintenance workflow excluded from successful retention slots '
                              '(default: cleanup-build-history.yml)')
-    parser.add_argument('--protect-workflow', help='preserve every run and artifact of this workflow filename')
+    parser.add_argument('--protect-workflow', help='preserve runs of this workflow, except verified empty manager prebuilds')
     parser.add_argument('--execute', action='store_true', help='delete candidates; default is read-only')
     parser.add_argument('--summary', default=os.environ.get('GITHUB_STEP_SUMMARY'))
     args = parser.parse_args(argv)
@@ -483,8 +522,8 @@ def main(argv=None):
             validate_workflow(args.exclude_workflow)
             if args.exclude_workflow == 'all':
                 raise CleanupError('Only one exact maintenance workflow can be excluded')
-        if args.keep < 1:
-            raise CleanupError('At least one successful workflow run must be retained')
+        if args.keep < 0:
+            raise CleanupError('Successful workflow retention must be a nonnegative integer')
         current_run_id = os.environ.get('GITHUB_RUN_ID') or None
         if current_run_id is not None and not re.fullmatch(r'[1-9][0-9]*', current_run_id):
             raise CleanupError('GITHUB_RUN_ID is invalid')

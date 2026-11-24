@@ -198,7 +198,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_history_cleanup_requires_explicit_default_branch_manual_operation(self):
         standalone = generator.cleanup_history_workflow()
-        self.assertEqual(standalone['name'], '清理历史记录（保留2条成功及发行记录）')
+        self.assertEqual(standalone['name'], '清理历史记录（保留发行及管理器产物）')
         self.assertEqual(standalone['run-name'], standalone['name'])
         self.assertEqual(standalone['on'], {'workflow_dispatch': {}})
         self.assertEqual(set(standalone['jobs']), {'cleanup-history'})
@@ -214,7 +214,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
         self.assertIs(checkout['with']['persist-credentials'], False)
         self.assertEqual(execute['env'], {'GH_TOKEN': '${{ github.token }}'})
-        self.assertIn('--keep 2 --exclude-workflow cleanup-build-history.yml --protect-workflow prebuild-manager-apks.yml', execute['run'])
+        self.assertIn('--keep 0 --exclude-workflow cleanup-build-history.yml --protect-workflow prebuild-manager-apks.yml', execute['run'])
         self.assertIn('--execute', execute['run'])
         self.assertIn('--workflow all', execute['run'])
         self.assertIn('--summary "$GITHUB_STEP_SUMMARY"', execute['run'])

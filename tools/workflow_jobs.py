@@ -2,7 +2,7 @@
 import re
 
 
-HISTORY_CLEANUP_NAME = '清理历史记录（保留2条成功及发行记录）'
+HISTORY_CLEANUP_NAME = '清理历史记录（保留发行及管理器产物）'
 MANUAL_SYNC = "github.event_name == 'workflow_dispatch' && inputs.operation == '同步官方更新'"
 UPSTREAM_SYNC_PATHS = ('data/kernels.json\ndata/upstream-candidates.json\n'
                        'data/susfs-upstream-candidates.json\nbuild-compatibility.json\n'
@@ -35,7 +35,7 @@ def cleanup_history_job():
              'env': {'GH_TOKEN': '${{ github.token }}'},
              'run': '''python3 tools/cleanup_workflow_runs.py \\
   --repo "$GITHUB_REPOSITORY" --workflow all \\
-  --keep 2 --exclude-workflow cleanup-build-history.yml --protect-workflow prebuild-manager-apks.yml \\
+  --keep 0 --exclude-workflow cleanup-build-history.yml --protect-workflow prebuild-manager-apks.yml \\
   --execute --summary "$GITHUB_STEP_SUMMARY"
 '''},
         ],
