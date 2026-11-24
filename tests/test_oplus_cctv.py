@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+import uuid
 
 import yaml
 
@@ -131,7 +132,143 @@ class CctvSchemes(unittest.TestCase):
             self.assertIn('/data/adb/ksud module install', text)
             visible = '\n'.join(line for line in text.splitlines() if line.startswith(('ui_print ', 'kernel.string=')))
             self.assertNotIn('cctv', visible.lower())
-            self.assertLess(text.index('Kernel/Android/KMI mismatch'), text.index('\nsplit_boot\n'))
+            if row['id'] == 'mt6993-6.12.58':
+                self.assertLess(text.index('\nsplit_boot\n'), text.index('Kernel/Android/KMI mismatch'))
+                self.assertLess(text.index('Kernel/Android/KMI mismatch'), text.index('\n    unpack_ramdisk\n'))
+            else:
+                self.assertLess(text.index('Kernel/Android/KMI mismatch'), text.index('\nsplit_boot\n'))
+
+    def test_original_boot_guard_is_limited_to_one_profile_and_legacy_is_exact(self):
+        for row in self.rows:
+            prefix = row['kernel'] + '-' + row['android_version'] + '-5'
+            current = cctv.installer_script(row, 'SukiSU', prefix)
+            legacy = cctv.installer_script(row, 'SukiSU', prefix, legacy=True)
+            raw = (ROOT / 'third_party/cctv-oplus/anykernel.sh').read_text(encoding='utf-8')
+            original_guard = ('# boot install\n'
+                'case "$(uname -r)" in\n'
+                f'  {prefix}|{prefix}-*) ;;\n'
+                f'  *) abort "Kernel/Android/KMI mismatch: requires {prefix}" ;;\n'
+                'esac\nsplit_boot\n')
+            original = raw.replace('# boot install\nsplit_boot\n', original_guard, 1).replace(
+                'kernel.string=AnyKernel3 by KernelSU Developers | Build by cctv18',
+                f"kernel.string=Oplus {cctv.family(row['platform'])} {row['kernel']} SukiSU").replace(
+                'ui_print "内核构建者: Coolapk@cctv18"', 'ui_print "内核构建: cyzrqh/GKI"')
+            self.assertEqual(original.encode('utf-8'), legacy)
+            if row['id'] == 'mt6993-6.12.58':
+                self.assertNotEqual(legacy, current)
+                self.assertIn(b'"$AKHOME/tools/busybox"', current)
+            else:
+                self.assertEqual(legacy, current)
+
+    def run_original_boot_installer(self, kernel, *, running='6.12.58-android16-5-stock',
+                                    ramdisk=False, strings_fail=False, busybox=True):
+        directory = ROOT.parent / '.gki-upstream-cache' / ('cctv-boot-guard-' + uuid.uuid4().hex)
+        directory.mkdir()
+        self.addCleanup(shutil.rmtree, directory)
+        (directory / 'tools').mkdir()
+        (directory / 'original-kernel').write_bytes(kernel)
+        # Device access is replaced by inert local fixtures. BusyBox's
+        # strings contract is a NUL-separated printable fixture; its AWK
+        # program executes in the host's real awk, including exit statuses.
+        (directory / 'tools/ak3-core.sh').write_text('''AKHOME="$PWD"
+SPLITIMG="$PWD/split_img"
+ui_print() { printf '%s\\n' "$*"; }
+sync() { :; }
+sleep() { :; }
+chmod() { :; }
+abort() { echo abort >> trace; printf '%s\\n' "$*"; exit 1; }
+split_boot() {
+ echo split >> trace
+ mkdir split_img
+ cp original-kernel split_img/kernel
+ if [ "$TEST_RAMDISK" = yes ]; then echo fixture > split_img/ramdisk.cpio; fi
+}
+unpack_ramdisk() { echo unpack >> trace; }
+write_boot() { echo write >> trace; }
+flash_boot() { echo flash >> trace; }
+''', encoding='utf-8', newline='\n')
+        if busybox:
+            stub = directory / 'tools/busybox'
+            stub.write_text('''#!/bin/sh
+case "$1" in
+ uname) printf '%s\\n' "$TEST_RELEASE";;
+ strings)
+   [ "$TEST_STRINGS_FAIL" != yes ] || exit 1
+   shift
+   tr '\\000' '\\n' < "$1"
+ ;;
+ awk|rm) exec "$@";;
+ *) exit 99;;
+esac
+''', encoding='utf-8', newline='\n')
+            stub.chmod(0o755)
+        row = next(row for row in self.rows if row['id'] == 'mt6993-6.12.58')
+        (directory / 'anykernel.sh').write_bytes(cctv.installer_script(
+            row, 'SukiSU', '6.12.58-android16-5'))
+        result = subprocess.run([SHELL, './anykernel.sh'], cwd=directory, capture_output=True,
+            text=True, encoding='utf-8', timeout=15, env={**os.environ, 'TEST_RELEASE': running,
+                'TEST_RAMDISK': 'yes' if ramdisk else 'no',
+                'TEST_STRINGS_FAIL': 'yes' if strings_fail else 'no',
+                'PATH': str(Path(SHELL).parent) + os.pathsep + os.environ.get('PATH', '')})
+        trace = directory / 'trace'
+        return result, trace.read_text().splitlines() if trace.exists() else []
+
+    @staticmethod
+    def original_banner(release):
+        return b'\0Linux version ' + release.encode('ascii') + b' (builder@host) (clang fixture) #1 SMP\0'
+
+    @unittest.skipUnless(SHELL, 'Requires POSIX shell')
+    def test_original_boot_version_overrides_recovery_or_spoofed_uname_in_both_ramdisk_paths(self):
+        release = '6.12.58-android16-5-gabc123-4k'
+        for ramdisk in (False, True):
+            with self.subTest(ramdisk=ramdisk):
+                # Real Images contain this proc/version format string as well
+                # as their one literal, fully expanded build banner.
+                kernel = (self.original_banner(release)
+                    + self.original_banner(release).replace(b'#1 SMP', b'# SMP')
+                    + b'\0Linux version %s (%s) (%s) %s\0')
+                result, trace = self.run_original_boot_installer(kernel,
+                    running='6.6.89-android15-8-recovery', ramdisk=ramdisk)
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertEqual(['split', 'unpack', 'write'] if ramdisk else ['split', 'flash'], trace)
+                self.assertIn('Running kernel (uname -r): 6.6.89-android15-8-recovery', result.stdout)
+                self.assertIn('Detected original boot kernel: ' + release, result.stdout)
+
+    @unittest.skipUnless(SHELL, 'Requires POSIX shell')
+    def test_correct_running_uname_cannot_override_wrong_boot_kernel_android_or_kmi(self):
+        for release in ('6.12.57-android16-5-stock', '6.12.58-android15-5-stock',
+                        '6.12.58-android16-6-stock', '6.12.58-android16-50-stock'):
+            for ramdisk in (False, True):
+                with self.subTest(release=release, ramdisk=ramdisk):
+                    result, trace = self.run_original_boot_installer(self.original_banner(release), ramdisk=ramdisk)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual(['split', 'abort'], trace)
+                    self.assertIn('boot has ' + release, result.stdout)
+                    self.assertIn('requires 6.12.58-android16-5', result.stdout)
+
+    @unittest.skipUnless(SHELL, 'Requires POSIX shell')
+    def test_missing_conflicting_and_malformed_banners_fail_before_any_write(self):
+        correct = self.original_banner('6.12.58-android16-5-stock')
+        for kernel in (b'no banner\0', correct + self.original_banner('6.12.58-android16-6-stock'),
+                       b'\0Linux version 6.12.58-android16-5-stock\0',
+                       b'\0Linux version bad;release (builder@host)\0',
+                       b'\0Linux version %s (%s) (%s) %s\0',
+                       correct + b'\0Linux version %s malformed\0'):
+            with self.subTest(kernel=kernel):
+                result, trace = self.run_original_boot_installer(kernel, ramdisk=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(['split', 'abort'], trace)
+                self.assertIn('one unambiguous valid Linux version', result.stdout)
+
+    @unittest.skipUnless(SHELL, 'Requires POSIX shell')
+    def test_missing_busybox_and_strings_failure_cannot_fall_back_to_uname(self):
+        kernel = self.original_banner('6.12.58-android16-5-stock')
+        result, trace = self.run_original_boot_installer(kernel, busybox=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(['abort'], trace)
+        result, trace = self.run_original_boot_installer(kernel, strings_fail=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(['split', 'abort'], trace)
 
     def test_native_and_historical_provenance_are_kept_separate(self):
         for row in self.rows:

@@ -172,7 +172,7 @@ def prepare_maps(common, profile):
     return True
 
 
-def installer_script(profile, variant, prefix):
+def installer_script(profile, variant, prefix, *, legacy=False):
     validate_profile(profile)
     from manager_variants import MANAGERS
     if variant not in MANAGERS or not re.fullmatch(
@@ -183,7 +183,8 @@ def installer_script(profile, variant, prefix):
         raise catalog.CatalogError('Vendored OPlus AnyKernel3 script checksum changed')
     raw = path.read_text(encoding='utf-8')
     # Preserve the native split/unpack/write/flash sequence and both optional
-    # module installers. Add the real compiled version guard before split_boot.
+    # module installers. The explicit legacy renderer keeps historical package
+    # verification byte-for-byte reproducible; new packages use the default.
     marker = '# boot install\nsplit_boot\n'
     if raw.count(marker) != 1:
         raise catalog.CatalogError('Pinned OPlus installer layout changed')
@@ -192,6 +193,43 @@ def installer_script(profile, variant, prefix):
              f'  {prefix}|{prefix}-*) ;;\n'
              f'  *) abort "Kernel/Android/KMI mismatch: requires {prefix}" ;;\n'
              'esac\nsplit_boot\n')
+    if profile['id'] == 'mt6993-6.12.58' and not legacy:
+        # The pinned modern AK3 path uses magiskboot unpack -h: split_boot
+        # reads the selected boot partition and decompresses its original
+        # kernel into SPLITIMG/kernel. It has not repacked/flashed anything.
+        # Recovery's uname, and a spoofed running uname, are only diagnostics.
+        # Use the packaged BusyBox explicitly instead of recovery applets.
+        guard = f'''# boot install
+oplus_guard_busybox="$AKHOME/tools/busybox"
+[ -x "$oplus_guard_busybox" ] || abort "Packaged BusyBox is unavailable; original boot kernel cannot be verified"
+oplus_running_release="$("$oplus_guard_busybox" uname -r 2>/dev/null)" || oplus_running_release=unavailable
+ui_print "Running kernel (uname -r): $oplus_running_release"
+split_boot
+[ -s "$SPLITIMG/kernel" ] && [ ! -L "$SPLITIMG/kernel" ] || abort "Original boot kernel is missing after split_boot"
+oplus_boot_strings="$AKHOME/.oplus-original-boot-strings"
+"$oplus_guard_busybox" strings "$SPLITIMG/kernel" > "$oplus_boot_strings" || abort "Cannot read original boot kernel Linux version"
+oplus_boot_release="$("$oplus_guard_busybox" awk '
+  /^Linux version %s [(]/ {{ next }}
+  /^Linux version / {{
+    banners++
+    if (NF < 4 || length($3) > 256 ||
+        $3 !~ /^[0-9]+[.][0-9]+[.][0-9]+-[A-Za-z0-9_.+-]+$/ || $4 !~ /^[(]/)
+      invalid = 1
+    if (release != "" && release != $3) conflicting = 1
+    release = $3
+  }}
+  END {{
+    if (!banners || invalid || conflicting) exit 1
+    print release
+  }}
+' "$oplus_boot_strings")" || abort "Original boot kernel must contain one unambiguous valid Linux version; running uname: $oplus_running_release"
+"$oplus_guard_busybox" rm -f "$oplus_boot_strings"
+ui_print "Detected original boot kernel: $oplus_boot_release"
+case "$oplus_boot_release" in
+  {prefix}|{prefix}-*) ;;
+  *) abort "Kernel/Android/KMI mismatch: boot has $oplus_boot_release; running uname: $oplus_running_release; requires {prefix}" ;;
+esac
+'''
     rendered = raw.replace(marker, guard, 1)
     rendered = rendered.replace('kernel.string=AnyKernel3 by KernelSU Developers | Build by cctv18',
         f"kernel.string=Oplus {family(profile['platform'])} {profile['kernel']} {variant}")

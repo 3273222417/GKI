@@ -175,10 +175,11 @@ def release_prefix(release: str, profile: dict) -> str:
     return match[1]
 
 
-def anykernel_script(profile: dict, variant: str, prefix: str, package: str | None = None) -> bytes:
+def anykernel_script(profile: dict, variant: str, prefix: str, package: str | None = None,
+                     *, legacy_boot_guard: bool = False) -> bytes:
     from oplus_cctv import is_cctv, installer_script
     if is_cctv(profile):
-        script = installer_script(profile, variant, prefix)
+        script = installer_script(profile, variant, prefix, legacy=legacy_boot_guard)
         label = manager_display_name(variant, package)
         return script.replace(f" {profile['kernel']} {variant}\n".encode(),
                               f" {profile['kernel']} {label}\n".encode(), 1)
@@ -546,7 +547,13 @@ def read_kernel(path: Path, *, expected_filename: str | None = None) -> dict:
         script = anykernel_script(document['profile'], document['ksu_variant'], document['compatibility_prefix'],
                                   document.get('manager_package'))
         legacy_script = anykernel_script(document['profile'], document['ksu_variant'], document['compatibility_prefix'])
-        if archive.read('anykernel.sh') not in (script, legacy_script):
+        accepted_scripts = {script, legacy_script}
+        if document['profile']['id'] == 'mt6993-6.12.58':
+            for package in (document.get('manager_package'), None):
+                accepted_scripts.add(anykernel_script(
+                    document['profile'], document['ksu_variant'], document['compatibility_prefix'],
+                    package, legacy_boot_guard=True))
+        if archive.read('anykernel.sh') not in accepted_scripts:
             raise AssetError('OPlus platform/full-version/KMI installation guards changed')
         payload = archive.read(PAYLOAD_MEMBER) if PAYLOAD_MEMBER in members else None
         verify_image(document, archive.read('Image'), payload)
