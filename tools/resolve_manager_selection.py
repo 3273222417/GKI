@@ -132,6 +132,10 @@ def selection_summary(receipt):
     receipt = validate_receipt(receipt)
     lines = ['### 本次管理器选择', '', '参与构建：'
              + ('、'.join(map(public_manager_selection, receipt['active_managers'])) or '无') + '。']
+    for variant in receipt['active_managers']:
+        source = receipt['sources'][variant]
+        lines.append(f"- {public_manager_selection(variant)} · `{source['ksu_source_branch'] or source['ksu_short']}`"
+                     f" · `{source['ksu_ref']}`")
     for row in receipt['skipped_managers']:
         lines.append('- 跳过 ' + public_manager_selection(row['variant']) + '：' + row['reason'] + '。')
     if not receipt['active_managers']:

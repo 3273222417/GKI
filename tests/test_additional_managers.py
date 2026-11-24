@@ -260,11 +260,14 @@ class CombinedWorkflowTests(unittest.TestCase):
 
     def test_shared_step_bindings_preserve_every_original_script_and_condition(self):
         from combined_manager_workflow import scoped
+        from manager_apk_worker import use_native_cache
         for oplus, single in ((False, self.single), (True, oplus_workflow(ROOT, self.single))):
             document, _ = add_combined(single, oplus=oplus)
+            expected_jobs = copy.deepcopy(single['jobs'])
+            use_native_cache(expected_jobs['build-sukisu-lkm'], expected_jobs['build-sukisu-manager'])
             for name in ('prepare-matrix', 'build-sukisu-manager', 'build-sukisu-lkm',
                          'build-oplus-kernel' if oplus else 'build-kernel'):
-                job, original = document['jobs'][name], single['jobs'][name]
+                job, original = document['jobs'][name], expected_jobs[name]
                 expected = scoped(copy.deepcopy(original['steps']))
                 actual = job['steps']
                 if name == 'prepare-matrix':

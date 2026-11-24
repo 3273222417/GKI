@@ -88,11 +88,14 @@ def require_selection(job):
 
 
 def add_combined(workflow, *, oplus):
+    from manager_apk_worker import use_native_cache
+
     root = copy.deepcopy(workflow)
     kernel_id = 'build-oplus-kernel' if oplus else 'build-kernel'
     publish_id = 'verify-oplus-assets' if oplus else 'publish-release'
     jobs = root['jobs']
     original_prepare = copy.deepcopy(jobs['prepare-matrix'])
+    use_native_cache(jobs['build-sukisu-lkm'], jobs['build-sukisu-manager'])
     original_manager = copy.deepcopy(jobs['build-sukisu-manager'])
     # Keep a single lightweight discovery stage. Empty active selections are
     # successful no-op runs, so no empty manager matrix reaches a runner.

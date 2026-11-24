@@ -43,8 +43,6 @@ def record_job() -> dict:
              'env': {'STATE_JSON': '${{ ' + CHECK_OUTPUTS + 'state }}'},
              'run': 'python3 tools/manager_prebuild.py record --state-json "$STATE_JSON" '
                     '--output "$RUNNER_TEMP/gki-manager-apk-observations.json"'},
-            {'name': '归档已验证的管理器版本记录', 'uses': 'actions/upload-artifact@v7',
-             'with': {'path': STATE_FILE, 'archive': False, 'if-no-files-found': 'error', 'overwrite': True}},
             {'name': '保存成功版本记录', 'uses': 'actions/cache/save@v5',
              'continue-on-error': True,
              'with': {'path': STATE_FILE, 'key': STATE_KEY}},

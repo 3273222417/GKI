@@ -44,7 +44,7 @@ def matrix_job(job, matrix, maximum):
 
 
 def use_native_cache(native, manager):
-    """Keep prebuild transfers off the Actions artifact list."""
+    """Transfer verified native inputs through caches, with a local rebuild on misses."""
     upload = next(step for step in native['steps'] if step.get('with', {}).get('name', '')
                   .startswith('internal-manager-native-'))
     native['steps'].remove(upload)
@@ -118,7 +118,7 @@ done < "$RUNNER_TEMP/prebuild-native-misses"
     manager['steps'][position:position + len(KMIS)] = restore + [
         {'name': '在本次 APK 作业补编缺失的原生模块', 'if': condition,
          'env': env, 'run': rebuild}]
-    manager['timeout-minutes'] = 90
+    manager['timeout-minutes'] = max(manager['timeout-minutes'], 90)
 
 
 def create_jobs(base):
@@ -128,7 +128,7 @@ def create_jobs(base):
     for key in ('matrix', 'count', 'full_catalog', 'max_parallel', 'susfs_sources'):
         prepare['outputs'].pop(key, None)
     omit = {'检查并生成矩阵', '校验旧版内核 SUSFS 映射兼容性', '验证共享源码还原及原生符号接口',
-            '矩阵展开前统一下载并固定 SUSFS', '自动删除已成功的清理记录'}
+            '矩阵展开前统一下载并固定 SUSFS', '自动删除已成功的清理记录', '上传原始配套 APK'}
     prepare['steps'] = [step for step in prepare['steps'] if step.get('name') not in omit]
     source = next(step for step in prepare['steps'] if step.get('id') == 'sources')
     source['env'].pop('GH_TOKEN')

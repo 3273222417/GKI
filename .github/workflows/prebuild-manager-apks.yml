@@ -729,14 +729,6 @@ jobs:
         python3 tools/restore_prebuilt_manager_apk.py --variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \
           --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \
           --source-identity "$MANAGER_SOURCE_IDENTITY" --cache-dir manager-apk-cache --output-dir manager-artifact --source-dir ksu-snapshot-source --branch "$DEFAULT_BRANCH"
-    - name: 上传原始配套 APK
-      uses: actions/upload-artifact@v7
-      if: steps.adopt-apk.outputs.manager_apk_reused == 'true'
-      with:
-        path: manager-artifact/${{ steps.adopt-apk.outputs.apk_filename }}
-        archive: false
-        if-no-files-found: error
-        overwrite: true
     - name: 保存本次不可变源码缓存
       uses: actions/cache/save@v5
       timeout-minutes: 3
@@ -1609,13 +1601,6 @@ jobs:
       env:
         STATE_JSON: ${{ needs.check-upstream.outputs.manager_prebuild_state }}
       run: python3 tools/manager_prebuild.py record --state-json "$STATE_JSON" --output "$RUNNER_TEMP/gki-manager-apk-observations.json"
-    - name: 归档已验证的管理器版本记录
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ runner.temp }}/gki-manager-apk-observations.json
-        archive: false
-        if-no-files-found: error
-        overwrite: true
     - name: 保存成功版本记录
       uses: actions/cache/save@v5
       continue-on-error: true

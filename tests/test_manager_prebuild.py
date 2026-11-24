@@ -303,11 +303,10 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertIn("prebuild-manager-apks.result == 'success'", recorder['if'])
         self.assertIn("prebuild-manager-apks.result == 'skipped'", recorder['if'])
         self.assertIn("manager_prebuild_state_changed == 'true'", recorder['if'])
-        archive, cache = recorder['steps'][-2:]
+        cache = recorder['steps'][-1]
         self.assertEqual(cache['with']['key'], STATE_KEY)
-        self.assertEqual(archive['uses'], 'actions/upload-artifact@v7')
-        self.assertEqual(archive['with']['path'], '${{ runner.temp }}/' + STATE_ARTIFACT)
-        self.assertFalse(archive['with']['archive'])
+        self.assertEqual(cache['with']['path'], '${{ runner.temp }}/' + STATE_ARTIFACT)
+        self.assertFalse(any(step.get('uses', '').startswith('actions/upload-artifact@') for step in recorder['steps']))
 
     def test_every_slot_publishes_the_ddk_lock_used_to_restore_all_native_modules(self):
         jobs = prebuild_workflow(create_workflow(ROOT))['jobs']
@@ -349,6 +348,16 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertLess(manager.index(rebuild), manager.index(staging))
         self.assertIn('tools/prepare_manager_lkm.py stage', staging['run'])
         self.assertIn('tools/manager_full_native.py stage', staging['run'])
+
+    def test_prebuild_adopts_original_apk_without_uploading_it_or_rebuilding_native(self):
+        jobs = prebuild_workflow(create_workflow(ROOT))['jobs']
+        prepare = jobs['prebuild-manager-sources']['steps']
+        self.assertTrue(any(step.get('id') == 'adopt-apk' for step in prepare))
+        self.assertFalse(any(step.get('uses', '').startswith('actions/upload-artifact@') for step in prepare))
+        for name, text in (('prebuild-manager-native', '编译并核实同版本原生模块'),
+                           ('prebuild-manager-apks', '编译管理器与同版本 ksud')):
+            step = next(step for step in jobs[name]['steps'] if step['name'] == text)
+            self.assertIn("outputs[format('{0}_manager_adoption', matrix.slot)] == ''", step['if'])
 
     def test_discovery_runs_independently_of_the_susfs_probe(self):
         check = prebuild_workflow(create_workflow(ROOT))['jobs']['check-upstream']
