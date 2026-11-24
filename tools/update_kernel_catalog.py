@@ -22,10 +22,18 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = "https://android.googlesource.com/kernel/"
 SHA = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\Z")
 MONTHLY = re.compile(r"refs/heads/(deprecated/)?(common-)?(android[0-9]+)-([0-9]+\.[0-9]+)-([0-9]{4}-[0-9]{2})\Z")
+# Git's canonical SHA-1 for a tree with no entries.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class CatalogError(ValueError):
     """Official source metadata is incomplete or disagrees with a known pair."""
+
+
+class CatalogHTTPError(CatalogError):
+    def __init__(self, path: str, status: int):
+        super().__init__(f"Cannot read official Android kernel source {path} (HTTP {status})")
+        self.status = status
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -49,10 +57,10 @@ class OfficialProvider:
                     return raw
             except HTTPError as error:
                 if error.code not in (429, 500, 502, 503, 504) or attempt == 2:
-                    raise CatalogError(f"Cannot read the official Android kernel source (HTTP {error.code})") from error
+                    raise CatalogHTTPError(path, error.code) from None
             except (URLError, OSError) as error:
                 if attempt == 2:
-                    raise CatalogError("Cannot read the official Android kernel source after three attempts") from error
+                    raise CatalogError(f"Cannot read official Android kernel source {path} after three attempts") from error
             time.sleep(attempt + 1)
         raise CatalogError("Cannot read the official Android kernel source")
 
@@ -94,17 +102,34 @@ class OfficialProvider:
             refs[ref] = commit.lower()
         return refs
 
-    def makefile(self, commit: str) -> str:
+    def makefile(self, commit: str) -> str | None:
         if not isinstance(commit, str) or not SHA.fullmatch(commit):
             raise CatalogError("Makefile reads require a full official commit ID")
         # A cold snapshot may need historical versions once. Pace those reads
         # instead of bursting through every monthly branch in a minute.
         time.sleep(1)
-        raw = self.get("common/+/" + commit.lower() + "/Makefile?format=TEXT")
+        commit = commit.lower()
+        try:
+            raw = self.get("common/+/" + commit + "/Makefile?format=TEXT")
+        except CatalogHTTPError as error:
+            if error.status == 404 and self._is_empty_tree(commit):
+                return None
+            raise
         try:
             return base64.b64decode(b"".join(raw.split()), validate=True).decode("utf-8")
         except (UnicodeError, binascii.Error, ValueError) as error:
             raise CatalogError("Official kernel Makefile is not valid Gitiles text") from error
+
+    def _is_empty_tree(self, commit: str) -> bool:
+        # Use the same immutable revision as the failing Makefile read.
+        raw = self.get("common/+/" + commit + "/?format=JSON")
+        if not raw.startswith(b")]}'\n"):
+            raise CatalogError("Official kernel tree is not valid Gitiles JSON")
+        try:
+            tree = json.loads(raw[5:])
+        except (UnicodeError, ValueError) as error:
+            raise CatalogError("Official kernel tree is not valid Gitiles JSON") from error
+        return tree == {"id": EMPTY_TREE, "entries": []}
 
 
 def monthly_refs(refs: dict[str, str], repository: str) -> dict[tuple[str, str, str], tuple[str, str]]:
@@ -215,8 +240,9 @@ def discover_updates(root: Path, provider=None, *, snapshot_file: Path | None = 
             tagged.setdefault(key, []).append(entry)
     tags = None
     added = []
+    placeholders = set()
     for android, family, date in candidates:
-        _, commit = common[(android, family, date)]
+        ref, commit = common[(android, family, date)]
         full = versions.get(commit) or fixed.get(commit)
         if full is None and (android, family, date) in tagged:
             if tags is None:
@@ -227,8 +253,16 @@ def discover_updates(root: Path, provider=None, *, snapshot_file: Path | None = 
                 raise CatalogError("Official tags assign different kernel versions to one commit")
             if matches:
                 full = matches.pop()
-        if full is None:
-            full = makefile_version(provider.makefile(commit), family)
+        if full is None and commit not in placeholders:
+            content = provider.makefile(commit)
+            if content is None:
+                placeholders.add(commit)
+            else:
+                full = makefile_version(content, family)
+        if commit in placeholders:
+            print(f"Official Android branch {ref} is awaiting source publication (empty tree {commit})",
+                  file=sys.stderr)
+            continue
         full = _full_version(full, family, "Official ref snapshot")
         if commit not in versions:
             versions[commit] = full

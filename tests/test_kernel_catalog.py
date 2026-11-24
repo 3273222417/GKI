@@ -330,8 +330,46 @@ class KernelCatalogTests(unittest.TestCase):
         self.assertTrue(snapshot.is_file())
         self.assertEqual(self.path.read_bytes(), self.original)
 
+    def test_empty_monthly_branches_are_deferred_and_rechecked_after_publication(self):
+        placeholder, published, next_release = "a" * 40, "b" * 40, "c" * 40
+        provider = FakeProvider().branch(month="2026-12", commit=placeholder)
+        provider.branch("android16", "6.12", month="2026-12", commit=placeholder)
+        provider.branch(month="2027-01", commit=published, sublevel=998)
+        provider.makefiles[placeholder] = None
+        snapshot = self.root / "refs.json"
+        with redirect_stderr(io.StringIO()) as logs:
+            report = catalog.update_catalog(self.root, provider, snapshot_file=snapshot)
+        self.assertEqual([row['ref'] for row in json.loads(report['candidates_json'])], [published])
+        self.assertEqual(provider.reads.count(('makefile', placeholder)), 1)
+        self.assertIn('android14-6.1-2026-12 is awaiting source publication', logs.getvalue())
+        self.assertIn('android16-6.12-2026-12 is awaiting source publication', logs.getvalue())
+        self.assertNotIn(placeholder, catalog.load_snapshot(snapshot))
+        provider.branch(month="2026-12", commit=next_release)
+        with redirect_stderr(io.StringIO()):
+            report = catalog.update_catalog(self.root, provider, snapshot_file=snapshot)
+        self.assertEqual({row['ref'] for row in json.loads(report['candidates_json'])}, {next_release, published})
+        self.assertEqual(self.path.read_bytes(), self.original)
+
 
 class OfficialProviderTests(unittest.TestCase):
+    def test_missing_makefile_is_deferred_only_for_confirmed_empty_tree(self):
+        provider = catalog.OfficialProvider()
+        commit = "648e13791289125f4447184856d1b211f32d5daf"
+        paths = [f"common/+/{commit}/Makefile?format=TEXT", f"common/+/{commit}/?format=JSON"]
+        for tree, result in (({"id": catalog.EMPTY_TREE, "entries": []}, True),
+                             ({"id": "b" * 40, "entries": []}, False),
+                             ({"id": catalog.EMPTY_TREE, "entries": [{"name": "README"}]}, False)):
+            with self.subTest(tree=tree), patch.object(catalog.time, "sleep"):
+                response = b")]}'\n" + json.dumps(tree).encode()
+                with patch.object(provider, "get", side_effect=[catalog.CatalogHTTPError(paths[0], 404),
+                                                                response]) as get:
+                    if result:
+                        self.assertIsNone(provider.makefile(commit))
+                    else:
+                        with self.assertRaisesRegex(catalog.CatalogHTTPError, "HTTP 404"):
+                            provider.makefile(commit)
+                    self.assertEqual([call.args[0] for call in get.call_args_list], paths)
+
     def test_annotated_official_tag_uses_peeled_commit(self):
         provider = catalog.OfficialProvider()
         value = {"android14-release": {"value": "a" * 40, "peeled": "B" * 40}}
