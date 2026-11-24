@@ -26,7 +26,7 @@ PRESERVED = ('id', 'target_commitish', 'name', 'body', 'draft', 'prerelease', 'p
 
 
 class Deferred(ValueError):
-    """An active publication owns the current numbering; retry on its completion."""
+    """Retry release maintenance from a fresh inventory."""
 
 
 class MetadataTransport(Transport):
@@ -68,7 +68,9 @@ class GitHub:
 def inventory(api, release_id: int) -> list[tuple]:
     assets = []
     for page in range(1, 101):
-        batch = api.request(f'/releases/{release_id}/assets?per_page=100&page={page}')
+        batch = api.request(f'/releases/{release_id}/assets?per_page=100&page={page}', missing=True)
+        if batch is None:
+            raise Deferred(f'Release {release_id} is no longer visible while reading its assets; refresh the release list')
         if not isinstance(batch, list) or len(batch) > 100:
             raise ValueError('Invalid release asset inventory')
         for asset in batch:
@@ -156,6 +158,13 @@ def same_release(expected, actual, tag):
             and all(actual.get(field) == expected.get(field) for field in PRESERVED))
 
 
+def read_release(api, release_id):
+    release = api.request('/releases/' + str(release_id), missing=True)
+    if release is None:
+        raise Deferred(f'Release {release_id} is no longer visible; refresh the release list')
+    return release
+
+
 def read_ref(api, tag):
     value = api.request('/git/ref/tags/' + tag, missing=True)
     if value is None:
@@ -196,11 +205,11 @@ def reorder(api, *, execute=False, current_run_id='', report_path: Path | None =
     fresh, fresh_refs = snapshot(api)
     if (len(fresh) != len(releases) or fresh_refs != refs
             or any(not same_release(before, after, before['tag_name']) for before, after in zip(releases, fresh))):
-        raise ValueError('Release inventory changed after planning; no labels were changed')
+        raise Deferred('Release inventory changed after planning; no labels were changed')
     for release, row in zip(releases, rows):
         if row['old'] == row['new']:
             continue
-        actual = api.request('/releases/' + str(release['id']))
+        actual = read_release(api, release['id'])
         if not same_release(release, actual, row['old']) or inventory(api, release['id']) != assets[release['id']]:
             raise ValueError('Release or asset changed before retagging; remaining labels preserved')
         occupied = [item for item in list_releases(api) if item['tag_name'] == row['new']]
@@ -219,7 +228,7 @@ def reorder(api, *, execute=False, current_run_id='', report_path: Path | None =
         if read_ref(api, row['new']) != row['sha']:
             raise ValueError('Destination tag does not point to the preserved producer commit')
         api.request('/releases/' + str(release['id']), method='PATCH', data={'tag_name': row['new']})
-        actual = api.request('/releases/' + str(release['id']))
+        actual = read_release(api, release['id'])
         if not same_release(release, actual, row['new']) or inventory(api, release['id']) != assets[release['id']]:
             raise ValueError('Release preservation check failed; no remaining tags were changed')
     # Re-read all releases before pruning only the originally observed refs.

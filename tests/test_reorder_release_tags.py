@@ -127,6 +127,31 @@ class ReorderTests(unittest.TestCase):
         self.assertEqual('completed', reorder.reorder(api, execute=True)['state'])
         self.assertEqual(original_assets, [item['assets'] for item in api.releases])
 
+    def test_release_deleted_during_inventory_retries_from_a_fresh_list(self):
+        for path in ('/releases/11/assets?per_page=100&page=1',
+                     '/releases/11/assets?per_page=100&page=2', '/releases/11'):
+            with self.subTest(path=path):
+                api = FakeAPI([release(0, 'r1.0'), release(1, 'r1.2', asset_count=101), release(2, 'r1.4')])
+                request = api.request
+                retained = copy.deepcopy(api.releases[-1])
+
+                def delete_during_read(resource, *, method='GET', data=None, missing=False):
+                    if resource == path and method == 'GET':
+                        self.assertTrue(missing)
+                        api.releases.pop(1)
+                        return None
+                    return request(resource, method=method, data=data, missing=missing)
+
+                with mock.patch.object(api, 'request', side_effect=delete_during_read), \
+                        self.assertRaisesRegex(reorder.Deferred, 'Release 11 is no longer visible'):
+                    reorder.reorder(api, execute=True)
+                self.assertEqual([], api.writes)
+                result = reorder.reorder(api, execute=True)
+                self.assertEqual('completed', result['state'])
+                self.assertEqual({**retained, 'tag_name': 'r1.1'}, api.releases[-1])
+                self.assertEqual(retained['target_commitish'], api.refs['r1.1'])
+                self.assertEqual({'r1.0', 'r1.1'}, set(api.refs))
+
     def test_compaction_rolls_over_both_major_boundaries_without_losing_release_data(self):
         api = FakeAPI([release(index, 'r1.' + str(index + 1), asset_count=2) for index in range(43)])
         before = copy.deepcopy(api.releases)
