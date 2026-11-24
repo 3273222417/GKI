@@ -367,7 +367,7 @@ class GitHubIdentityReaderTests(unittest.TestCase):
             self.assertNotIn('asset.example', diagnostics.getvalue())
             self.assertNotIn('SECRET', diagnostics.getvalue())
 
-    def test_permanent_http_and_unknown_cli_failures_are_not_retried(self):
+    def test_permanent_http_failures_are_not_retried(self):
         for message, category in (
             (b'gh: denied (HTTP 401) SECRET', 'HTTP 401'),
             (b'gh: denied (HTTP 403) SECRET connection reset', 'HTTP 403'),
@@ -375,7 +375,6 @@ class GitHubIdentityReaderTests(unittest.TestCase):
             (b'gh: missing (HTTP 404) SECRET', 'HTTP 404'),
             (b'gh: invalid (HTTP 422) SECRET', 'HTTP 422'),
             (b'gh: unavailable (HTTP 501) SECRET', 'HTTP 501'),
-            (b'gh: opaque private error SECRET', 'GitHub CLI request failed'),
         ):
             with self.subTest(message=message), patch.object(identity.subprocess, 'run',
                     return_value=self.response(status=1, stderr=message)) as run, \
@@ -386,6 +385,25 @@ class GitHubIdentityReaderTests(unittest.TestCase):
             sleep.assert_not_called()
             self.assertIn('manager producer lookup', str(raised.exception))
             self.assertNotIn('SECRET', str(raised.exception))
+
+    def test_cli_failure_without_http_status_can_recover_and_stays_bounded(self):
+        for attempts, recovered in ((1, False), (3, True), (3, False)):
+            error = self.response(status=1, stderr=b'gh: opaque private error SECRET')
+            responses = [error, self.response()] if recovered else [error] * attempts
+            diagnostics = io.StringIO()
+            with self.subTest(attempts=attempts, recovered=recovered), \
+                    patch.object(identity.subprocess, 'run', side_effect=responses) as run, \
+                    patch.object(identity.time, 'sleep') as sleep, contextlib.redirect_stderr(diagnostics):
+                reader = identity.GitHubReader('cyzrqh/gki', attempts=attempts)
+                endpoint = 'actions/runs/123/attempts/1'
+                if recovered:
+                    self.assertEqual({'artifacts': []}, reader.get(endpoint))
+                else:
+                    with self.assertRaisesRegex(identity.IdentityError, f'GitHub CLI request failed.*attempt {attempts}/{attempts}'):
+                        reader.get(endpoint)
+                self.assertEqual(len(responses), run.call_count)
+                self.assertEqual(len(responses) - 1, sleep.call_count)
+            self.assertNotIn('SECRET', diagnostics.getvalue())
 
     def test_every_allowlisted_transient_http_status_is_bounded_at_three_attempts(self):
         for code in (408, 429, 500, 502, 503, 504):

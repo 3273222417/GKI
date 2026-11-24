@@ -264,7 +264,9 @@ class GitHubReader:
         lower = stderr.lower()
         if any(marker in lower for marker in NETWORK_FAILURES):
             return 'temporary network failure', True
-        return 'GitHub CLI request failed', False
+        # gh can lose a request before receiving an HTTP status. Use the same
+        # bounded retry window when no status is available for classification.
+        return 'GitHub CLI request failed', True
 
     def get(self, suffix: str, *, binary: bool = False):
         if (not re.fullmatch(r"actions/[A-Za-z0-9_/?=&.%+-]+", suffix)

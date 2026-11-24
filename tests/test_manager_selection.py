@@ -27,7 +27,7 @@ def source(variant, tier='正式版', reference=None, branch=None):
 
 
 def resolve(group=COMBINED_SELECTION, missing=(), tier='正式版'):
-    def choose(root, variant, channel, custom_ref, susfs):
+    def choose(root, variant, channel, custom_ref, susfs, *, live_channel=False):
         if variant in missing:
             raise sources.NoStableRelease('No published official stable release')
         return source(variant, channel)
@@ -37,7 +37,7 @@ def resolve(group=COMBINED_SELECTION, missing=(), tier='正式版'):
 
 def resolve_latest(group=COMBINED_SELECTION, same=(), unreleased=(), *, calls=None):
     """Latest and formal are distinct by default; same chooses a real equal SHA."""
-    def choose(root, variant, tier, custom_ref, susfs):
+    def choose(root, variant, tier, custom_ref, susfs, *, live_channel=False):
         channel = selection.effective_tier(tier)
         if calls is not None:
             calls.append((variant, channel))
@@ -104,15 +104,16 @@ class ManagerSelectionTests(unittest.TestCase):
                 selection.resolve_selection(COMBINED_SELECTION, '正式版')
         self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
 
-    def test_latest_without_susfs_uses_same_official_source_as_prebuild(self):
+    def test_latest_uses_same_official_source_as_prebuild_with_or_without_susfs(self):
         repository = sources.REPOSITORIES['KernelSU-Next']
         official = 'f' * 40
-        with patch('approved_manager_builds.read_approved') as approved, \
-                patch.object(sources, 'official_selection', return_value=(official, 'dev')) as lookup:
-            receipt = selection.resolve_selection('KernelSU-Next', '最新版')
-        approved.assert_not_called()
-        lookup.assert_called_once_with(repository, LATEST, '')
-        self.assertEqual(receipt['sources']['KernelSU-Next'], source('KernelSU-Next', LATEST, official, 'dev'))
+        for susfs in (False, True):
+            with self.subTest(susfs=susfs), patch('approved_manager_builds.read_approved') as approved, \
+                    patch.object(sources, 'official_selection', return_value=(official, 'dev')) as lookup:
+                receipt = selection.resolve_selection('KernelSU-Next', '最新版', susfs=susfs)
+            approved.assert_not_called()
+            lookup.assert_called_once_with(repository, LATEST, '')
+            self.assertEqual(receipt['sources']['KernelSU-Next'], source('KernelSU-Next', LATEST, official, 'dev'))
 
     def test_live_combined_latest_uses_the_current_official_stable_for_skipping(self):
         duplicate = 'e' * 40
@@ -126,12 +127,13 @@ class ManagerSelectionTests(unittest.TestCase):
                 raise sources.NoStableRelease('No published stable')
             return ('f' if tier == LATEST else 'c') * 40, 'dev' if tier == LATEST else 'v1.0'
 
-        with patch('approved_manager_builds.read_approved') as approved, \
-                patch.object(sources, 'official_selection', side_effect=select):
-            receipt = selection.resolve_selection(COMBINED_SELECTION, '最新版')
-        approved.assert_not_called()
-        self.assertEqual(receipt['active_managers'], ['BakaSU', 'KernelSU-Next'])
-        self.assertEqual(receipt['skipped_managers'][0]['stable_source']['ksu_ref'], duplicate)
+        for susfs in (False, True):
+            with self.subTest(susfs=susfs), patch('approved_manager_builds.read_approved') as approved, \
+                    patch.object(sources, 'official_selection', side_effect=select):
+                receipt = selection.resolve_selection(COMBINED_SELECTION, '最新版', susfs=susfs)
+            approved.assert_not_called()
+            self.assertEqual(receipt['active_managers'], ['BakaSU', 'KernelSU-Next'])
+            self.assertEqual(receipt['skipped_managers'][0]['stable_source']['ksu_ref'], duplicate)
 
     def test_receipt_rejects_forged_subsets_sources_and_skip_reasons(self):
         original = resolve(missing=('BakaSU',))
@@ -243,7 +245,7 @@ class LatestManagerSelectionTests(unittest.TestCase):
 
     def test_equal_version_labels_with_different_shas_do_not_skip(self):
         for group, requested in COMBINED_GROUPS.items():
-            def choose(root, variant, tier, custom_ref, susfs):
+            def choose(root, variant, tier, custom_ref, susfs, *, live_channel=False):
                 return source(variant, tier, branch='v4.3.0')
             with self.subTest(group=group), patch.object(selection, 'resolve_sources', side_effect=choose):
                 receipt = selection.resolve_selection(group, '最新版', susfs=True)
@@ -253,23 +255,13 @@ class LatestManagerSelectionTests(unittest.TestCase):
     def test_network_or_invalid_formal_lookup_errors_are_not_treated_as_missing(self):
         for group in COMBINED_GROUPS:
             for reason in ('official formal network failure', 'invalid formal response'):
-                def choose(root, variant, tier, custom_ref, susfs):
+                def choose(root, variant, tier, custom_ref, susfs, *, live_channel=False):
                     if selection.effective_tier(tier) == 'Stable(标准)':
                         raise sources.SourceResolutionError(reason)
                     return source(variant, tier)
                 with self.subTest(group=group, reason=reason), patch.object(selection, 'resolve_sources', side_effect=choose):
                     with self.assertRaisesRegex(sources.SourceResolutionError, reason):
                         selection.resolve_selection(group, '最新版', susfs=True)
-
-    def test_real_resolver_keeps_approved_latest_when_no_formal_version_is_approved(self):
-        channels = {variant: {LATEST: (source(variant, LATEST)['ksu_ref'], 'main')} for variant in MANAGERS}
-        for group, requested in COMBINED_GROUPS.items():
-            with self.subTest(group=group), patch('approved_manager_builds.read_approved', return_value=channels), \
-                    patch.object(sources, 'github_json') as api:
-                receipt = selection.resolve_selection(group, '最新版', susfs=True)
-            api.assert_not_called()
-            self.assertEqual(list(requested), receipt['active_managers'])
-            self.assertEqual([], receipt['skipped_managers'])
 
     def test_proof_schema_tampering_cannot_claim_a_latest_formal_duplicate(self):
         for group, requested in COMBINED_GROUPS.items():
@@ -318,7 +310,7 @@ class LatestManagerSelectionTests(unittest.TestCase):
         for group, requested in COMBINED_GROUPS.items():
             with tempfile.TemporaryDirectory() as directory:
                 output, summary = Path(directory) / 'outputs', Path(directory) / 'summary'
-                def choose(root, variant, tier, custom_ref, susfs):
+                def choose(root, variant, tier, custom_ref, susfs, *, live_channel=False):
                     return source(variant, tier, reference=source(variant)['ksu_ref'])
                 with patch.dict(os.environ, {'GITHUB_OUTPUT': str(output), 'GITHUB_STEP_SUMMARY': str(summary)}), \
                         patch.object(selection, 'resolve_sources', side_effect=choose), contextlib.redirect_stdout(io.StringIO()):

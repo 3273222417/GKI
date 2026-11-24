@@ -95,8 +95,9 @@ def active_managers(selection, resolution=None):
 def resolve_selection(selection, tier, custom_ref='', susfs=False):
     requested = selected_managers(selection)
     channel = effective_tier(tier)
-    # Full SUSFS builds remain bound to the reviewed manager/SUSFS pairing.
-    lookup = {'live_channel': True} if channel == 'Latest(最新)' and not susfs else {}
+    # Use the same official latest source as APK prebuilds. SUSFS compatibility
+    # is checked against that fixed source before building the kernel.
+    lookup = {'live_channel': True} if channel == 'Latest(最新)' else {}
     active, skipped, sources = [], [], {}
     for variant in requested:
         try:
