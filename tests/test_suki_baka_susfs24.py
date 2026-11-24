@@ -105,6 +105,25 @@ void fallback(void) {
         with self.assertRaisesRegex(ValueError, 'package-list refresh callback'):
             compat.observer_with_priority(header + one.replace('track_throne(0)', 'track_throne(true)'), 'BakaSU')
 
+    def test_existing_native_braced_priority_command_is_preserved_and_checked(self):
+        self.source('kernel/supercall/supercall.c', BAKA_GATE)
+        native_case = ('#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n'
+                       '    case CMD_SUSFS_SET_PRIORITY_UID_FILTER: {\n'
+                       '        susfs_set_priority_uid_filter(arg);\n'
+                       '        return 0;\n'
+                       '    }\n'
+                       '#endif // CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n')
+        original = BAKA_DISPATCH.replace('    case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:',
+                                         native_case + '    case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:')
+        self.assertEqual(original, compat.dispatch_with_priority(self.root, original, 'BakaSU'))
+        self.assertEqual(original, guard_consumer(self.root / compat.DISPATCH, original))
+        for changed in (original.replace('return 0;\n    }\n#endif //', 'return -EINVAL;\n    }\n#endif //'),
+                        original.replace('susfs_set_priority_uid_filter(arg);', 'susfs_set_priority_uid_filter(other);'),
+                        original.replace('    }\n#endif // CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER',
+                                         '#endif // CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER')):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'priority UID|native root gate'):
+                compat.dispatch_with_priority(self.root, changed, 'BakaSU')
+
     def test_bakasu_lookup_only_accepts_the_exact_susfs_dispatch_delta(self):
         self.source('kernel/supercall/supercall.c', BAKA_GATE)
         native = BAKA_DISPATCH.encode()
@@ -139,6 +158,22 @@ void fallback(void) {
         path.write_text('/* int ksu_handle_input_handle_event(void) { return native_input(); } */\n')
         with self.assertRaisesRegex(ValueError, 'legacy SUSFS hook provider'):
             compat.native_preinit(self.root, 'BakaSU')
+
+    def test_native_priority_option_keeps_its_upstream_label_and_help(self):
+        source = ('config KSU_SUSFS\n    bool "SUSFS"\n\n'
+                  'config KSU_SUSFS_PRIORITY_UID_FILTER\n'
+                  '    bool "Enable SUSFS priority UID filter"\n'
+                  '    depends on KSU_SUSFS\n'
+                  '    default y\n'
+                  '    help\n'
+                  '        Native description.\n')
+        self.assertEqual(source, compat.configure(source, modern=False))
+        for changed in (source.replace('default y', 'default n'),
+                        source.replace('depends on KSU_SUSFS', 'depends on OTHER'),
+                        source.replace('    help', '    select OTHER\n    help'),
+                        source + '    default n\n'):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'existing SUSFS configuration'):
+                compat.configure(changed, modern=False)
 
     def test_suki_direct_hooks_keep_avc_lifecycle_without_unlinked_lsm_init(self):
         original = '''int __init kernelsu_init(void)

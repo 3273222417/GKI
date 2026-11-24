@@ -189,6 +189,9 @@ def resolve_setprocattr(source: Path, *, reverse: bool = False) -> bool:
     official = subprocess.check_output([*git, 'show', 'HEAD:' + PATH], timeout=30).decode('utf-8')
     updated = resolved_text(path.read_text(encoding='utf-8'), official, reverse=reverse)
     if updated is None:
+        from next_setxattr_compat import resolve_setxattr
+        updated = resolve_setxattr(source, path.read_text(encoding='utf-8'), official, reverse=reverse)
+    if updated is None:
         return False
     path.write_text(updated, encoding='utf-8', newline='\n')
     subprocess.run([*git, '-c', 'core.autocrlf=false', 'add', '--', PATH], check=True, timeout=30)

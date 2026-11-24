@@ -19,8 +19,9 @@ config KSU_SUSFS_PRIORITY_UID_FILTER
 \t  - Allow hiding user-defined uids from syscalls like getpriority/setpriority/ioprio_get/ioprio_set.
 \t  - Effective on all processes with uid >= 10000.
 '''
-CASE = re.compile(r'(?m)^([ \t]*)case CMD_SUSFS_SET_PRIORITY_UID_FILTER:\s*\n'
-                  r'[ \t]*susfs_set_priority_uid_filter\(arg\);\s*\n[ \t]*return 0;[^\S\n]*\n')
+CASE = re.compile(r'(?m)^([ \t]*)case CMD_SUSFS_SET_PRIORITY_UID_FILTER:[ \t]*(?P<brace>\{)?[ \t]*\n'
+                  r'[ \t]*susfs_set_priority_uid_filter\(arg\);\s*\n[ \t]*return 0;[^\S\n]*\n'
+                  r'(?(brace)[ \t]*\}[^\S\n]*\n)')
 PARSER = 'susfs_parse_priority_app_strings'
 SETTER = 'susfs_set_priority_uid_filter'
 PARSER_CALL = re.compile(r'(?m)^[ \t]*susfs_parse_priority_app_strings\s*\(\s*\)\s*;[^\S\n]*(?:\n|$)')

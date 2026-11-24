@@ -88,25 +88,34 @@ def policy_hooks(text: str, *, baka_layout: bool = False) -> str:
                     '    }\n')
             returned = '    return true;\n'
             registration = guard('    ' + TYPE_CALL)
-            tails = ((tail + '\n', 2), (tail, 1))
-            if TYPE in body:
-                if body.count(TYPE_CALL) != 3 or any(
-                        body.count(context + registration + returned) != count for context, count in tails):
-                    raise ValueError('Review the BakaSU SUSFS policy type registration branches')
-                return body
-            if any(body.count(context + returned) != count for context, count in tails):
-                raise ValueError('Review the native BakaSU SUSFS policy type allocation branches')
-            for context, _ in tails:
-                body = body.replace(context + returned, context + registration + returned)
-            return body
-        if TYPE in body:
-            if body.count(TYPE_CALL) != 1 or not body.endswith('    return true;\n}'):
-                raise ValueError('Review the existing SUSFS policy type registration')
+            existing = (r'#ifdef CONFIG_KSU_SUSFS\n    ' + re.escape(TYPE_CALL)
+                        + r'\n#endif[^\S\n]*(?://[^\n]*)?\n')
+            branches = list(re.finditer(re.escape(tail) + r'(?P<blank>\n?)'
+                                       + r'(?P<registration>' + existing + r')?'
+                                       + re.escape(returned), body))
+            if (len(branches) != 3 or sum(bool(branch['blank']) for branch in branches) != 2
+                    or body.count(TYPE) != sum(bool(branch['registration']) for branch in branches)):
+                raise ValueError('Review the BakaSU SUSFS policy type registration branches')
+            for branch in reversed(branches):
+                if not branch['registration']:
+                    at = branch.end() - len(returned)
+                    body = body[:at] + registration + body[at:]
             return body
         tail = ('        ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);\n'
-                '    }\n\n    return true;\n}')
-        return once(body, tail, tail.replace('    return true;\n}',
-                                             guard('    ' + TYPE_CALL) + '    return true;\n}'), 'policy type')
+                '    }\n\n')
+        registration = (r'#ifdef CONFIG_KSU_SUSFS\n    ' + re.escape(TYPE_CALL)
+                        + r'\n#endif[^\S\n]*(?://[^\n]*)?\n')
+        successes = list(re.finditer(re.escape(tail) + '(?P<registration>' + registration + ')?'
+                                     + r'    return true;\n', body))
+        if (len(successes) != 1 or body.count(TYPE) != bool(successes[0]['registration'])):
+            raise ValueError('Review the existing SUSFS policy type registration')
+        success = successes[0]
+        if success['registration']:
+            return body
+        # New upstreams keep allocation-failure labels after the success path.
+        # Register only after installation, retaining all native unwind paths.
+        at = success.end() - len('    return true;\n')
+        return body[:at] + guard('    ' + TYPE_CALL) + body[at:]
 
     updated = inside(inside(text, 'add_rule_raw', avd), 'add_type', types)
     for call, count in ((AVD_CALL, 1), (TYPE_CALL, 3 if baka_layout else 1)):

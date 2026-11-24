@@ -4,7 +4,8 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from additional_susfs24 import PRIORITY_CASE, PRIORITY_REFRESH, priority_dispatch, priority_observer
+from additional_susfs24 import (AVD_DECL, TYPE_CALL, TYPE_DECL, PRIORITY_CASE, PRIORITY_REFRESH,
+                                 guard, policy_hooks, priority_dispatch, priority_observer)
 from verify_kow_susfs import function_source
 
 
@@ -27,6 +28,88 @@ DISPATCH = '''int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd
 
 
 class AdditionalSusfs24Tests(unittest.TestCase):
+    def test_next_registration_precedes_success_and_preserves_native_allocation_unwind(self):
+        rule = '''static bool add_rule_raw(void)
+{
+        if (invert && valid) {
+            node = original;
+        } else {
+        if (!node)
+                return false;
+        }
+        if (invert) {
+            node->datum.u.data &= permission;
+        } else {
+            node->datum.u.data |= permission;
+        }
+}
+'''
+        unwind = '''
+out_free:
+    kfree(key);
+out_free_type:
+    kfree(type);
+    return false;
+}'''
+        types = '''static bool add_type(void)
+{
+    if (!type)
+        goto out_free_type;
+    db->type_val_to_struct[value - 1] = type;
+    for (i = 0; i < db->p_roles.nprim; ++i) {
+        ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);
+    }
+
+    return true;
+''' + unwind
+        source = '#include "ss/symtab.h"\n' + rule + types
+        result = policy_hooks(source)
+        self.assertIn(unwind, result)
+        self.assertEqual(1, result.count(TYPE_CALL))
+        self.assertLess(result.index(TYPE_CALL), result.index('    return true;'))
+        self.assertEqual(result, policy_hooks(result))
+        commented = result.replace('#endif\n    return true;', '#endif // #ifdef CONFIG_KSU_SUSFS\n    return true;')
+        self.assertEqual(commented, policy_hooks(commented))
+        for mutation in (result.replace(TYPE_CALL, TYPE_CALL.replace('type->value', 'other')),
+                         result.replace('#ifdef CONFIG_KSU_SUSFS\n    ' + TYPE_CALL,
+                                        '#ifdef OTHER\n    ' + TYPE_CALL),
+                         result.replace('out_free:\n', 'out_free:\n    ' + TYPE_CALL + '\n')):
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, 'type registration'):
+                policy_hooks(mutation)
+
+    def test_bakasu_preserves_native_modern_registration_and_completes_legacy_paths(self):
+        tail = ('        ebitmap_set_bit(&db->role_val_to_struct[i]->types, value - 1, 1);\n'
+                '    }\n')
+        native = guard('    ' + TYPE_CALL).replace('#endif\n', '#endif // #ifdef CONFIG_KSU_SUSFS\n')
+        rule = '''static bool add_rule_raw(void)
+{
+        if (invert && valid) {
+            node = original;
+        } else {
+        if (!node)
+                return false;
+        }
+        if (invert) {
+            node->datum.u.data &= permission;
+        } else {
+            node->datum.u.data |= permission;
+        }
+}
+'''
+        loop = '    for (i = 0; i < db->p_roles.nprim; ++i) {\n'
+        source = ('#include "ss/symtab.h"\n' + guard(AVD_DECL + '\n' + TYPE_DECL) + rule
+                  + 'static bool add_type(void)\n{\n#if MODERN\n' + loop + tail + '\n' + native + '    return true;\n'
+                  + '#elif VENDOR\n' + loop + tail + '\n    return true;\n#else\n'
+                  + loop + tail + '    return true;\n#endif\n}\n')
+        updated = policy_hooks(source, baka_layout=True)
+        self.assertEqual(3, updated.count(TYPE_CALL))
+        self.assertIn(native, updated)
+        self.assertEqual(updated, policy_hooks(updated, baka_layout=True))
+        for changed in (source.replace(TYPE_CALL, TYPE_CALL.replace('type->value', 'other')),
+                        source.replace(native, native.replace('#ifdef CONFIG_KSU_SUSFS', '#ifdef OTHER', 1))):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'type registration branches'):
+                policy_hooks(changed, baka_layout=True)
+
     def test_priority_command_remains_root_only_and_native_toolkit_is_unchanged(self):
         updated = priority_dispatch(DISPATCH)
         self.assertIn('if (magic2 == SUSFS_MAGIC && current_uid().val == 0)', updated)

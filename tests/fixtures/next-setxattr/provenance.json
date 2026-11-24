@@ -1,0 +1,6 @@
+{
+  "repository": "KernelSU-Next/KernelSU-Next",
+  "commit": "896f45a78c0806cfd585c4e14e6989f867b143d7",
+  "path": "kernel/feature/selinux_hide.c",
+  "sha256": "30de2610ada01233cd9ab4521716416951be623e710863e8c9bdcbd9e6e69dfb"
+}

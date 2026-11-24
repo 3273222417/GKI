@@ -80,6 +80,15 @@ int main(void) {
             complete_priority(self.root)
         self.assertEqual(state, (self.config.read_bytes(), self.implementation.read_bytes()))
 
+    def test_braced_native_case_uses_the_same_optional_api_guard(self):
+        text = self.dispatch.read_text().replace('case CMD_SUSFS_SET_PRIORITY_UID_FILTER:\n',
+                                               'case CMD_SUSFS_SET_PRIORITY_UID_FILTER: {\n')
+        text = text.replace('            return 0;\n        default:', '            return 0;\n        }\n        default:')
+        self.dispatch.write_text(text)
+        complete_priority(self.root)
+        self.assertIn('case CMD_SUSFS_SET_PRIORITY_UID_FILTER: {', self.dispatch.read_text())
+        self.assertEqual((), complete_priority(self.root))
+
     def test_old_unconditional_api_remains_unchanged(self):
         self.header.write_text('void susfs_set_priority_uid_filter(void **arg);\n'
                                'void susfs_parse_priority_app_strings(void);\n')

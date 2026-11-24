@@ -120,7 +120,9 @@ def dispatch_with_priority(source: Path, text: str, variant: str) -> str:
                 + f'{body}return 0;\n' + END_GUARD)
     count = len(re.findall(r'\b(?:' + COMMAND + '|' + SETTER + r')\b', code))
     if count:
-        if count == 2 and text[:anchor.start()].endswith(addition):
+        native_block = (GUARD + f'{label}case {COMMAND}: {{\n{body}{SETTER}(arg);\n'
+                        + f'{body}return 0;\n{label}}}\n' + END_GUARD)
+        if count == 2 and text[:anchor.start()].endswith((addition, native_block)):
             return text
         raise ValueError('Review the existing SUSFS priority UID command route')
     return text[:anchor.start()] + addition + text[anchor.start():]
@@ -278,11 +280,18 @@ def configure(text: str, modern: bool, *, native_query: bool = False) -> str:
                                       (NATIVE_QUERY, NATIVE_QUERY_CONFIG, native_query)):
         count = len(re.findall(r'(?m)^config ' + name + r'\s*$', text))
         if count:
-            if not enabled or count != 1 or definition.strip() not in text:
+            block = re.search(r'(?ms)^config ' + name + r'\n.*?(?=^(?:config|menuconfig|menu|endmenu|'
+                              r'if|endif|choice|endchoice|comment)\b|\Z)', text)
+            expected = definition.strip() in text
+            if name == OPTION and block is not None:
+                expected = re.fullmatch(
+                    r'config ' + OPTION + r'\n(?P<indent>[ \t]+)bool "[^"\n]+"\n'
+                    r'(?P=indent)depends on KSU_SUSFS\n(?P=indent)default y\n'
+                    r'(?:(?P=indent)help\n(?:(?P=indent)[ \t]+[^\n]*\n|[ \t]*\n)*)?[ \t\n]*',
+                    block[0].rstrip() + '\n') is not None
+            if not enabled or count != 1 or not expected:
                 raise ValueError('Review the existing SUSFS configuration for ' + name)
             if name == NATIVE_QUERY:
-                block = re.search(r'(?ms)^config ' + name + r'\n.*?(?=^(?:config|menuconfig|menu|endmenu|'
-                                  r'if|endif|choice|endchoice|comment)\b|\Z)', text)
                 if block is None or block[0].strip() != definition.strip():
                     raise ValueError('Native SELinux query capability requires its exact hidden builtin-only configuration')
         elif enabled:
