@@ -5,7 +5,7 @@ import copy
 import re
 
 from manager_lkm_jobs import KMIS, lkm_cache_key
-from manager_prebuild import BUILD_CHANNELS, slot_for
+from manager_prebuild import CHANNELS, slot_for
 from manager_variants import MANAGERS
 from reuse_manager_jobs import expression
 
@@ -15,7 +15,7 @@ NATIVE = 'prebuild-manager-native'
 MANAGER = 'prebuild-manager-apks'
 DISCOVERY = 'needs.check-upstream.outputs.manager_prebuild_'
 NATIVE_LAYOUT = 'select-native-builds'
-SLOTS = tuple(slot_for(variant, channel) for variant in MANAGERS for channel in BUILD_CHANNELS)
+SLOTS = tuple(slot_for(variant, channel) for variant in MANAGERS for channel in CHANNELS)
 SUBSTITUTIONS = {
     'inputs.kernelsu_variant': 'matrix.variant',
     'inputs.kernelsu_branch': 'matrix.tier',

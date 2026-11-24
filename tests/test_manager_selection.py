@@ -81,26 +81,31 @@ class ManagerSelectionTests(unittest.TestCase):
             with self.assertRaisesRegex(sources.SourceResolutionError, 'network failure'):
                 selection.resolve_selection(COMBINED_SELECTION, '正式版')
 
-    def test_actual_source_resolver_skips_only_missing_approved_release_and_freezes_other_tags(self):
-        channels = {variant: {LATEST: (source(variant, LATEST)['ksu_ref'], 'main')} for variant in MANAGERS}
-        for variant in ('SukiSU', 'KernelSU-Next'):
-            channels[variant][STABLE] = (source(variant)['ksu_ref'], 'v1.0')
-        with patch('approved_manager_builds.read_approved', return_value=channels), \
-                patch.object(sources, 'github_json') as api:
-            receipt = selection.resolve_selection(COMBINED_SELECTION, '正式版')
-        api.assert_not_called()
-        self.assertEqual(['SukiSU', 'KernelSU-Next'], receipt['active_managers'])
-        self.assertTrue(all(row['ksu_source_branch'] == 'v1.0' for row in receipt['sources'].values()))
-        self.assertIn('暂无通过校验的正式版', selection.selection_summary(receipt))
+    def test_formal_uses_only_current_official_release_and_skips_missing_tags(self):
+        def lookup(repository, channel, custom_ref):
+            self.assertEqual(STABLE, channel)
+            if repository == sources.REPOSITORIES['BakaSU']:
+                raise sources.NoStableRelease('No published official release')
+            return 'e' * 40, 'v2.0'
+
+        for susfs in (False, True):
+            with self.subTest(susfs=susfs), patch('approved_manager_builds.read_approved') as approved, \
+                    patch.object(sources, 'official_selection', side_effect=lookup):
+                receipt = selection.resolve_selection(COMBINED_SELECTION, '正式版', susfs=susfs)
+            approved.assert_not_called()
+            self.assertEqual(['SukiSU', 'KernelSU-Next'], receipt['active_managers'])
+            self.assertTrue(all(row['ksu_source_branch'] == 'v2.0' and row['ksu_ref'] == 'e' * 40
+                                for row in receipt['sources'].values()))
+            self.assertIn(selection.SKIP_REASON, selection.selection_summary(receipt))
 
     def test_older_missing_stable_receipts_still_validate(self):
         receipt = resolve(missing=('BakaSU',))
-        receipt['skipped_managers'][0]['reason'] = '官方尚未发布正式版'
+        receipt['skipped_managers'][0]['reason'] = selection.LEGACY_SKIP_REASON
         self.assertEqual(('SukiSU', 'KernelSU-Next'), selection.active_managers(COMBINED_SELECTION, receipt))
 
-    def test_invalid_approval_table_cannot_be_treated_as_missing_stable(self):
-        with patch('approved_manager_builds.read_approved', side_effect=ValueError('invalid manifest')):
-            with self.assertRaisesRegex(sources.SourceResolutionError, 'invalid manifest') as caught:
+    def test_invalid_official_response_cannot_be_treated_as_missing_stable(self):
+        with patch.object(sources, 'official_selection', side_effect=sources.SourceResolutionError('invalid release')):
+            with self.assertRaisesRegex(sources.SourceResolutionError, 'invalid release') as caught:
                 selection.resolve_selection(COMBINED_SELECTION, '正式版')
         self.assertNotIsInstance(caught.exception, sources.NoStableRelease)
 

@@ -12,8 +12,8 @@ from resolve_build_sources import (NoStableRelease, REPOSITORIES, SHA, TIERS, TI
                                    SourceResolutionError, resolve_sources, validate_ref)
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_REASON = '暂无通过校验的正式版'
-LEGACY_SKIP_REASON = '官方尚未发布正式版'
+SKIP_REASON = '官方尚未发布正式版'
+LEGACY_SKIP_REASON = '暂无通过校验的正式版'
 LATEST_STABLE_REASON = '最新版与正式版源码相同'
 SOURCE_FIELDS = {'ksu_ref', 'ksu_repo', 'ksu_short', 'ksu_source_branch', 'effective_ksu_branch'}
 FIELDS = {'schema_version', 'selection', 'tier', 'active_managers', 'skipped_managers', 'sources'}
@@ -95,9 +95,9 @@ def active_managers(selection, resolution=None):
 def resolve_selection(selection, tier, custom_ref='', susfs=False):
     requested = selected_managers(selection)
     channel = effective_tier(tier)
-    # Use the same official latest source as APK prebuilds. SUSFS compatibility
-    # is checked against that fixed source before building the kernel.
-    lookup = {'live_channel': True} if channel == 'Latest(最新)' else {}
+    # Resolve both channels just as APK prebuilds do. SUSFS compatibility
+    # is checked against the selected source before building the kernel.
+    lookup = {'live_channel': True} if channel in ('Stable(标准)', 'Latest(最新)') else {}
     active, skipped, sources = [], [], {}
     for variant in requested:
         try:
@@ -141,7 +141,7 @@ def selection_summary(receipt):
         lines.append('- 跳过 ' + public_manager_selection(row['variant']) + '：' + row['reason'] + '。')
     if not receipt['active_managers']:
         message = ('所选管理器的最新版均与正式版相同' if effective_tier(receipt['tier']) == 'Latest(最新)'
-                   else '所选管理器暂无通过校验的正式版')
+                   else '所选管理器均未发布官方正式版')
         lines += ['', message + '，本次不编译、不发行。']
     return '\n'.join(lines) + '\n'
 

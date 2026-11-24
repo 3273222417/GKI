@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import sys
 
-from approved_manager_builds import ChannelSources, LATEST, STABLE, read_approved
+from approved_manager_builds import ChannelSources, LATEST, STABLE
 from check_official_updates import UpdateError, github_lookup, write_outputs
 from manager_lkm_jobs import load_ddk_matrix
 from manager_variants import MANAGERS
@@ -21,18 +21,14 @@ from wait_manager_identity import GitHubReader, IdentityError, positive_integer
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANNELS = {STABLE: '正式版', LATEST: '最新版'}
-PAIRED_STABLE = 'SUSFS-paired-Stable(标准)'
-PAIRED_LATEST = 'SUSFS-paired-Latest(最新)'
-BUILD_CHANNELS = {**CHANNELS, PAIRED_STABLE: 'SUSFS 审核配套正式版', PAIRED_LATEST: 'SUSFS 审核配套最新版'}
-PAIRED_TIERS = {PAIRED_STABLE: STABLE, PAIRED_LATEST: LATEST}
+LEGACY_CHANNELS = frozenset(('SUSFS-paired-Stable(标准)', 'SUSFS-paired-Latest(最新)'))
 MAX_STATE = 8192
 STATE_VERSION = 3
 STATE_ARTIFACT = 'gki-manager-apk-observations.json'
 
 
 def slot_for(variant: str, tier: str) -> str:
-    suffixes = {STABLE: '_stable', LATEST: '_latest',
-                PAIRED_STABLE: '_paired_stable', PAIRED_LATEST: '_paired_latest'}
+    suffixes = {STABLE: '_stable', LATEST: '_latest'}
     return variant.lower() + suffixes[tier]
 
 
@@ -44,7 +40,8 @@ def source(reference: str, branch: str) -> tuple[str, str]:
 
 def state_document(channels: ChannelSources) -> dict:
     return {'schema_version': STATE_VERSION, 'recipe_sha256': recipe_hash(ROOT), 'channels': {
-        variant: {tier: {'reference': ref, 'source_branch': branch} for tier, (ref, branch) in selected.items()}
+        variant: {tier: {'reference': ref, 'source_branch': branch} for tier, (ref, branch) in selected.items()
+                  if tier not in LEGACY_CHANNELS}
         for variant, selected in channels.items()
     }}
 
@@ -57,10 +54,15 @@ def validate_state(document: object) -> ChannelSources:
         raise ValueError('无效的管理器预编译记录')
     result = {}
     for variant, selected in document['channels'].items():
-        if not isinstance(selected, dict) or LATEST not in selected or selected.keys() - BUILD_CHANNELS.keys():
+        if (not isinstance(selected, dict) or LATEST not in selected
+                or selected.keys() - CHANNELS.keys() - LEGACY_CHANNELS):
             raise ValueError('无效的管理器预编译版本记录')
         sources = {}
         for tier, identity in selected.items():
+            # Records created by older workflows can contain fixed pairings.
+            # Only their observed official channels carry over to new runs.
+            if tier in LEGACY_CHANNELS:
+                continue
             if not isinstance(identity, dict) or set(identity) != {'reference', 'source_branch'}:
                 raise ValueError('无效的管理器预编译源码记录')
             sources[tier] = source(identity['reference'], identity['source_branch'])
@@ -111,27 +113,6 @@ def plan(channels: ChannelSources, previous: ChannelSources) -> tuple[dict, dict
                                                   'slot': slot_for(variant, tier), 'reference': reference,
                                                   'source_branch': branch, 'channels': []})
             row['channels'].append(label)
-        for channel, tier in PAIRED_TIERS.items():
-            if channel not in channels[variant]:
-                continue
-            reference, branch = channels[variant][channel]
-            identity = (reference, branch)
-            # An official channel observed before it moved upstream already
-            # covers the same reviewed source; keep its APK and original run.
-            if identity in previous.get(variant, {}).values():
-                continue
-            if any(identity == channels[variant].get(official) for official in CHANNELS):
-                # Retain the existing official same-commit coalescing rule.
-                if reference in targets:
-                    targets[reference]['channels'].append(BUILD_CHANNELS[channel])
-                continue
-            row = next((row for row in targets.values()
-                        if (row['reference'], row['source_branch']) == identity), None)
-            if row is None:
-                row = {'variant': variant, 'tier': tier, 'slot': slot_for(variant, channel),
-                       'reference': reference, 'source_branch': branch, 'channels': []}
-                targets[identity] = row
-            row['channels'].append(BUILD_CHANNELS[channel])
         for row in targets.values():
             row['channels'] = ' / '.join(row['channels'])
             rows.append(row)
@@ -153,10 +134,6 @@ def discover_channels() -> ChannelSources:
             except NoStableRelease:
                 if tier != STABLE:
                     raise
-    for variant, reviewed in read_approved(ROOT).items():
-        for channel, tier in PAIRED_TIERS.items():
-            if tier in reviewed:
-                channels[variant][channel] = reviewed[tier]
     return channels
 
 
