@@ -34,7 +34,7 @@ def record_job() -> dict:
         'needs': ['check-upstream', 'prebuild-manager-apks'],
         'if': f"always() && !cancelled() && ({recorded})",
         'runs-on': 'ubuntu-24.04',
-        'timeout-minutes': 8,
+        'timeout-minutes': 4,
         'permissions': {'contents': 'read', 'actions': 'write'},
         'steps': [
             {'name': '检出验证工具', 'uses': 'actions/checkout@v6',
@@ -48,12 +48,6 @@ def record_job() -> dict:
             {'name': '保存成功版本记录', 'uses': 'actions/cache/save@v5',
              'continue-on-error': True,
              'with': {'path': STATE_FILE, 'key': STATE_KEY}},
-            {'name': '清理已被安装包使用的临时原生附件',
-             'if': "needs.prebuild-manager-apks.result == 'success'",
-             'continue-on-error': True, 'timeout-minutes': 4,
-             'env': {'GH_TOKEN': '${{ github.token }}'},
-             'run': 'python3 tools/cleanup_build_artifacts.py --run-id "$GITHUB_RUN_ID" '
-                    '--prebuild-internal --execute'},
         ],
     }
 

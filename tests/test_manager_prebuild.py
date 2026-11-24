@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from approved_manager_builds import APPROVED_PATH
 from check_official_updates import LOOKUP_ATTEMPTS, UpdateError
 from generate_workflow import create_workflow
+from manager_lkm_jobs import KMIS
 from manager_prebuild import (LATEST, STABLE, STATE_ARTIFACT, main, plan,
                               restore_previous, validate_state)
 from manager_prebuild_workflow import OUTPUT, STATE_KEY, UPDATER_PATH, prebuild_workflow
@@ -295,20 +296,18 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertNotIn('GH_TOKEN', frozen['env'])
         self.assertNotIn('CUSTOM_REF', frozen['env'])
         self.assertIn('manager_prebuild_lkm_matrix', workflow['jobs']['prebuild-manager-native']['strategy']['matrix'])
+        self.assertEqual(len(MANAGERS) * 2, workflow['jobs']['prebuild-manager-apks']['strategy']['max-parallel'])
         self.assertTrue(all('uses' not in workflow['jobs'][name] for name in (
             'prebuild-manager-sources', 'prebuild-manager-native', 'prebuild-manager-apks')))
         recorder = workflow['jobs']['record-manager-prebuild']
         self.assertIn("prebuild-manager-apks.result == 'success'", recorder['if'])
         self.assertIn("prebuild-manager-apks.result == 'skipped'", recorder['if'])
         self.assertIn("manager_prebuild_state_changed == 'true'", recorder['if'])
-        archive, cache, cleanup = recorder['steps'][-3:]
+        archive, cache = recorder['steps'][-2:]
         self.assertEqual(cache['with']['key'], STATE_KEY)
         self.assertEqual(archive['uses'], 'actions/upload-artifact@v7')
         self.assertEqual(archive['with']['path'], '${{ runner.temp }}/' + STATE_ARTIFACT)
         self.assertFalse(archive['with']['archive'])
-        self.assertEqual(cleanup['if'], "needs.prebuild-manager-apks.result == 'success'")
-        self.assertIn('--prebuild-internal --execute', cleanup['run'])
-        self.assertTrue(cleanup['continue-on-error'])
 
     def test_every_slot_publishes_the_ddk_lock_used_to_restore_all_native_modules(self):
         jobs = prebuild_workflow(create_workflow(ROOT))['jobs']
@@ -323,6 +322,33 @@ class ManagerPrebuildTest(unittest.TestCase):
                     self.assertLessEqual({f'{variant.lower()}_{tier}_{field}' for field in fields}, source['outputs'].keys())
         for variant in MANAGERS:
             self.assertIn('steps.lkm-matrix.outputs.matrix', source['outputs'][variant.lower() + '_latest_ddk_matrix'])
+
+    def test_prebuild_hands_off_all_native_modules_without_uploading_attachments(self):
+        base = create_workflow(ROOT)
+        jobs = prebuild_workflow(base)['jobs']
+        self.assertNotIn('internal-manager-native-', json.dumps(jobs))
+        self.assertIn('internal-manager-native-', json.dumps(base['jobs']['build-sukisu-lkm']))
+        native = jobs['prebuild-manager-native']['steps']
+        manager = jobs['prebuild-manager-apks']['steps']
+        cache_key = next(step['with']['key'] for step in native
+                         if step.get('id') == 'lkm-cache')
+        rebuild = next(step for step in manager if step['name'] == '在本次 APK 作业补编缺失的原生模块')
+        staging = next(step for step in manager if step['name'] == '按官方流程打包完整 LKM 模块')
+        for index, kmi in enumerate(KMIS):
+            cache_id = f'prebuild-kmi-{index}'
+            restore = next(step for step in manager if step.get('id') == cache_id)
+            ddk = ("fromJSON(needs.prebuild-manager-sources.outputs[format('{0}_ddk_matrix', matrix.slot)])"
+                   f'.include[{index}].ddk_short')
+            self.assertEqual(cache_key.replace('matrix.kmi', repr(kmi)).replace('matrix.ddk_short', ddk),
+                             restore['with']['key'])
+            self.assertEqual('manager-lkm/' + kmi, restore['with']['path'])
+            self.assertEqual(restore['if'], rebuild['if'])
+            self.assertIn("matrix.slot)] == ''", restore['if'])
+            self.assertEqual('${{ steps.' + cache_id + '.outputs.cache-hit }}', rebuild['env'][f'PREBUILD_KMI_{index}'])
+            self.assertLess(manager.index(restore), manager.index(rebuild))
+        self.assertLess(manager.index(rebuild), manager.index(staging))
+        self.assertIn('tools/prepare_manager_lkm.py stage', staging['run'])
+        self.assertIn('tools/manager_full_native.py stage', staging['run'])
 
     def test_discovery_runs_independently_of_the_susfs_probe(self):
         check = prebuild_workflow(create_workflow(ROOT))['jobs']['check-upstream']

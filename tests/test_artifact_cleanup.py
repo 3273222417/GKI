@@ -274,16 +274,5 @@ class PrebuildArtifactCleanupTests(unittest.TestCase):
                 self.assertEqual(1, cleanup.main(['--run-id', '123', '--prebuild-internal', '--completed-run', *arguments]))
             api.assert_not_called()
 
-    def test_cleanup_is_after_record_archive_and_only_for_successful_apk_matrix(self):
-        from manager_prebuild_workflow import record_job
-        job = record_job()
-        step = job['steps'][-1]
-        self.assertEqual("needs.prebuild-manager-apks.result == 'success'", step['if'])
-        self.assertIn('--prebuild-internal --execute', step['run'])
-        self.assertTrue(step['continue-on-error'])
-        self.assertLess(next(index for index, item in enumerate(job['steps'])
-                             if item.get('uses') == 'actions/upload-artifact@v7'), len(job['steps']) - 1)
-
-
 if __name__ == '__main__':
     unittest.main()
