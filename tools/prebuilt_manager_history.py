@@ -12,7 +12,7 @@ from wait_manager_identity import GitHubReader, IdentityError, validate_reposito
 WORKFLOW_FILE = 'prebuild-manager-apks.yml'
 WORKFLOW_PATH = '.github/workflows/' + WORKFLOW_FILE
 WORKFLOW_API = 'actions/workflows/' + WORKFLOW_FILE
-EVENTS = ('push', 'schedule', 'workflow_run')
+EVENTS = ('push', 'schedule', 'workflow_run', 'workflow_dispatch')
 SHA1 = re.compile(r'[0-9a-f]{40}\Z')
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
 PAGE_SIZE = 25

@@ -11,11 +11,12 @@ STATE_PREFIX = 'gki-manager-apk-observations-v4-'
 STATE_KEY = STATE_PREFIX + '${{ github.run_id }}-${{ github.run_attempt }}'
 UPDATER_NAME = '检查并同步官方更新'
 UPDATER_PATH = '.github/workflows/check-upstream-updates.yml'
-AUTOMATIC = ("(github.event_name == 'push' || (github.event_name == 'workflow_run' && "
-             "github.event.workflow_run.head_repository.full_name == github.repository && "
-             f"github.event.workflow_run.path == '{UPDATER_PATH}' && "
-             "(github.event.workflow_run.event == 'schedule' || "
-             "github.event.workflow_run.event == 'workflow_dispatch')))")
+TRUSTED_EVENT = ("(github.event_name == 'push' || github.event_name == 'workflow_dispatch' || "
+                 "(github.event_name == 'workflow_run' && "
+                 "github.event.workflow_run.head_repository.full_name == github.repository && "
+                 f"github.event.workflow_run.path == '{UPDATER_PATH}' && "
+                 "(github.event.workflow_run.event == 'schedule' || "
+                 "github.event.workflow_run.event == 'workflow_dispatch')))")
 DEFAULT = "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
 CHECK_OUTPUTS = 'needs.check-upstream.outputs.manager_prebuild_'
 DISCOVERY_OUTPUTS = ('matrix', 'lkm_matrix', 'pending', 'state', 'state_changed')
@@ -55,7 +56,7 @@ def prebuild_workflow(base: dict) -> dict:
 
     discovery = {
         'name': '确定六种管理器的正式版与最新版',
-        'if': AUTOMATIC + ' && ' + DEFAULT,
+        'if': TRUSTED_EVENT + ' && ' + DEFAULT,
         'runs-on': 'ubuntu-24.04', 'timeout-minutes': 10,
         'outputs': {'manager_prebuild_' + key: '${{ steps.manager-prebuild.outputs.' + key + ' }}'
                     for key in DISCOVERY_OUTPUTS},
@@ -73,7 +74,8 @@ def prebuild_workflow(base: dict) -> dict:
         ],
     }
     return {'name': '自动预编译管理器 APK',
-            'on': {'workflow_run': {'workflows': [UPDATER_NAME], 'types': ['completed'], 'branches': ['main']},
+            'on': {'workflow_dispatch': {},
+                   'workflow_run': {'workflows': [UPDATER_NAME], 'types': ['completed'], 'branches': ['main']},
                    'push': {'branches': ['main'], 'paths': list(dict.fromkeys(
                        [OUTPUT, 'config/validated-manager-builds.json', *RECIPE_INPUTS, *RECIPE_PATTERNS]))}},
             'permissions': {'contents': 'read', 'actions': 'write'},

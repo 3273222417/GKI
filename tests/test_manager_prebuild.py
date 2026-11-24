@@ -167,14 +167,14 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertEqual(plan(channels, restore_previous(reader, 'cyzrqh/GKI', 'main', 100))[0], {'include': []})
 
     def test_history_filters_branch_workflow_repository_and_artifact_origin(self):
-        run = history_run(95)
+        run = history_run(95, event='workflow_dispatch')
         payload = b'{"verified":true}'
         valid = history_artifact(73, 95, payload)
         invalid = history_artifact(74, 95, payload, workflow_run={**valid['workflow_run'], 'head_sha': ref(31)})
         reader = FakeHistory({
             WORKFLOW_API + '/runs?branch=main&status=success&per_page=25&page=1': {'workflow_runs': [
                 history_run(100), history_run(99, head_branch='fork'),
-                history_run(98, workflow_id=41), history_run(97, event='workflow_dispatch'),
+                history_run(98, workflow_id=41), history_run(97, event='workflow_dispatch', head_branch='topic'),
                 history_run(96, head_repository={'id': 13, 'full_name': 'fork/GKI'}), run,
             ]},
             'actions/runs/95/artifacts?per_page=25&page=1': {'artifacts': [invalid, valid]},
@@ -188,12 +188,13 @@ class ManagerPrebuildTest(unittest.TestCase):
         with self.assertRaises(IdentityError):
             verified_artifact(reader, run, valid, limit=len(payload) - 1)
 
-    def test_named_automatic_workflow_runs_independently_without_manual_entry(self):
+    def test_named_workflow_supports_automatic_and_manual_entry_on_main(self):
         updater = updater_workflow()
         self.assertNotIn('prebuild-managers', updater['jobs'])
         self.assertEqual(updater['on']['schedule'], [{'cron': '0 4,16 * * *'}])
         workflow = prebuild_workflow(create_workflow(ROOT))
-        self.assertEqual(set(workflow['on']), {'workflow_run', 'push'})
+        self.assertEqual(set(workflow['on']), {'workflow_run', 'push', 'workflow_dispatch'})
+        self.assertEqual(workflow['on']['workflow_dispatch'], {})
         self.assertEqual(workflow['on']['workflow_run'], {'workflows': [updater['name']],
                                                         'types': ['completed'], 'branches': ['main']})
         self.assertEqual(workflow['on']['push']['branches'], ['main'])
@@ -207,6 +208,9 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertTrue(set(RECIPE_PATTERNS).issubset(paths))
         self.assertIn('tools/build_fina_manager.py', paths)
         discovery = workflow['jobs']['check-upstream']
+        self.assertIn("github.event_name == 'workflow_dispatch'", discovery['if'])
+        self.assertIn("&& github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
+                      discovery['if'])
         self.assertIn(f"github.event.workflow_run.path == '{UPDATER_PATH}'", discovery['if'])
         self.assertIn('github.event.workflow_run.head_repository.full_name == github.repository', discovery['if'])
         self.assertIn("github.event.workflow_run.event == 'schedule'", discovery['if'])
