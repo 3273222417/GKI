@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
@@ -13,12 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 
 from approved_manager_builds import APPROVED_PATH
+from check_official_updates import LOOKUP_ATTEMPTS, UpdateError
 from generate_workflow import create_workflow
 from manager_prebuild import (LATEST, STABLE, STATE_ARTIFACT, main, plan,
                               restore_previous, validate_state)
 from manager_prebuild_workflow import OUTPUT, STATE_KEY, UPDATER_PATH, prebuild_workflow
 from manager_variants import MANAGERS
 from prebuilt_manager_history import WORKFLOW_API, WORKFLOW_PATH, run_artifacts, successful_runs, verified_artifact
+import resolve_build_sources as sources
+from resolve_build_sources import NoStableRelease, REPOSITORIES, SourceResolutionError
 from wait_manager_identity import IdentityError
 from workflow_jobs import updater_workflow
 
@@ -76,7 +81,7 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertEqual(by_manager['FinaSU'][0]['tier'], STABLE)
         self.assertEqual(validate_state(json.loads(json.dumps(state)))['SukiSU'][LATEST], (ref(31), 'dev'))
 
-    def test_automatic_only_builds_changed_approved_channels(self):
+    def test_automatic_only_builds_changed_official_channels(self):
         channels = approved_channels()
         _, state = plan(channels, {})
         channels['KowSU'][LATEST] = (ref(82), 'main')
@@ -111,18 +116,83 @@ class ManagerPrebuildTest(unittest.TestCase):
         matrix, _ = plan(channels, validate_state(observed))
         self.assertEqual([row['variant'] for row in matrix['include']], ['FinaSU'])
 
-    def test_discovery_uses_the_approved_versions_without_observing_live_channels(self):
+    def test_discovery_queues_updated_official_sources_without_waiting_for_sync(self):
         channels = approved_channels()
-        with patch('manager_prebuild.read_approved', return_value=channels) as read, \
-                patch('resolve_build_sources.github_json') as network, \
+        previous = {variant: dict(tiers) for variant, tiers in channels.items()}
+        channels['KernelSU-Next'][LATEST] = (ref(53), 'dev')
+        channels['BakaSU'][LATEST] = (ref(54), 'main')
+
+        def lookup(repository, tier, custom_ref):
+            variant = next(name for name in MANAGERS if REPOSITORIES[name] == repository)
+            if tier not in channels[variant]:
+                raise NoStableRelease('No official release')
+            return channels[variant][tier]
+
+        with patch('manager_prebuild.official_selection', side_effect=lookup), \
+                patch('approved_manager_builds.read_approved', side_effect=AssertionError('Old approved pin read')), \
+                patch('manager_prebuild.load_previous', return_value=previous), \
                 patch('manager_prebuild.write_outputs') as outputs, \
                 patch.dict('os.environ', {'GITHUB_OUTPUT': 'test-output'}):
-            self.assertEqual(main(['discover']), 0)
-        read.assert_called_once_with(ROOT)
-        network.assert_not_called()
+            self.assertEqual(main(['discover', '--previous', 'previous.json']), 0)
         matrix = json.loads(outputs.call_args.args[0]['matrix'])['include']
-        self.assertEqual({row['tier'] for row in matrix if row['variant'] == 'BakaSU'}, {LATEST})
-        self.assertIn(ref(31), {row['reference'] for row in matrix if row['variant'] == 'SukiSU'})
+        self.assertEqual([(row['variant'], row['tier'], row['reference'], row['source_branch']) for row in matrix],
+                         [('BakaSU', LATEST, ref(54), 'main'), ('KernelSU-Next', LATEST, ref(53), 'dev')])
+
+    def test_failed_official_lookup_never_uses_old_prebuild_state(self):
+        with patch('manager_prebuild.official_selection', side_effect=SourceResolutionError('Invalid commit')), \
+                patch('manager_prebuild.write_outputs') as outputs, redirect_stderr(io.StringIO()):
+            self.assertEqual(main(['discover']), 1)
+        outputs.assert_not_called()
+
+    def test_missing_official_stable_is_omitted_without_retrying_or_using_approved_state(self):
+        from manager_prebuild import discover_channels
+        channels = approved_channels()
+
+        def lookup(repository, tier, custom_ref):
+            variant = next(name for name in MANAGERS if REPOSITORIES[name] == repository)
+            if tier not in channels[variant]:
+                raise NoStableRelease('No official release')
+            return channels[variant][tier]
+
+        with patch('manager_prebuild.official_selection', side_effect=lookup) as official, \
+                patch('check_official_updates.time.sleep') as sleep:
+            self.assertEqual(channels, discover_channels())
+        self.assertEqual(len(MANAGERS) * 2, official.call_count)
+        sleep.assert_not_called()
+
+    def test_transient_official_failure_is_bounded_and_never_becomes_missing_stable(self):
+        from manager_prebuild import discover_channels
+        with patch('manager_prebuild.official_selection', side_effect=SourceResolutionError('GitHub source lookup failed')) as official, \
+                patch('check_official_updates.time.sleep') as sleep:
+            with self.assertRaisesRegex(UpdateError, 'after 3 attempts'):
+                discover_channels()
+        self.assertEqual(LOOKUP_ATTEMPTS, official.call_count)
+        self.assertEqual([1, 2], [call.args[0] for call in sleep.call_args_list])
+
+    def test_frozen_prebuild_cli_uses_discovered_sha_and_channel_without_requerying(self):
+        for variant in MANAGERS:
+            for tier, branch in ((LATEST, 'dev'), (STABLE, 'v4.0')):
+                expected = sources.source_result(ref(73), REPOSITORIES[variant], branch, tier)
+                with self.subTest(variant=variant, tier=tier), \
+                        patch.object(sources, 'resolve_sources', side_effect=AssertionError('Moving source lookup')), \
+                        patch.object(sources, 'github_json') as network, \
+                        patch.dict('os.environ', {'GITHUB_OUTPUT': ''}), redirect_stdout(io.StringIO()):
+                    self.assertEqual(expected, sources.frozen_channel_source(variant, tier, ref(73), branch))
+                    self.assertEqual(0, sources.main(['--variant', variant, '--tier', tier, '--susfs', 'false',
+                                                     '--fixed-ref', ref(73), '--fixed-source-branch', branch]))
+                network.assert_not_called()
+
+    def test_frozen_prebuild_rejects_partial_mutable_or_mixed_source_selection(self):
+        command = ['--variant', 'BakaSU', '--tier', LATEST, '--susfs', 'false']
+        for arguments in (['--fixed-ref', ref(73)], ['--fixed-source-branch', 'main'],
+                          ['--fixed-ref', 'main', '--fixed-source-branch', 'main'],
+                          ['--fixed-ref', 'A' * 40, '--fixed-source-branch', 'main'],
+                          ['--fixed-ref', ref(73), '--fixed-source-branch', '../invalid'],
+                          ['--fixed-ref', ref(73), '--fixed-source-branch', 'main', '--custom-ref', ref(74)]):
+            with self.subTest(arguments=arguments), patch.object(sources, 'github_json') as network, \
+                    patch.dict('os.environ', {'GITHUB_OUTPUT': ''}), redirect_stderr(io.StringIO()):
+                self.assertEqual(1, sources.main(command + arguments))
+            network.assert_not_called()
 
     def test_rejects_incomplete_and_invalid_observation_state(self):
         _, state = plan(approved_channels(), {})
@@ -219,6 +289,10 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertIn("manager_prebuild_pending == 'true'", auto['if'])
         self.assertIn('sukisu_latest_ksu_ref', auto['outputs'])
         self.assertIn('sukisu_stable_ksu_ref', auto['outputs'])
+        frozen = next(step for step in auto['steps'] if step.get('id') == 'sources')
+        self.assertIn('--fixed-ref "$EXPECTED_REF" --fixed-source-branch "$EXPECTED_SOURCE_BRANCH"', frozen['run'])
+        self.assertNotIn('GH_TOKEN', frozen['env'])
+        self.assertNotIn('CUSTOM_REF', frozen['env'])
         self.assertIn('manager_prebuild_lkm_matrix', workflow['jobs']['prebuild-manager-native']['strategy']['matrix'])
         self.assertTrue(all('uses' not in workflow['jobs'][name] for name in (
             'prebuild-manager-sources', 'prebuild-manager-native', 'prebuild-manager-apks')))

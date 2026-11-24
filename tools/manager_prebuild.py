@@ -8,12 +8,13 @@ import os
 from pathlib import Path
 import sys
 
-from approved_manager_builds import ChannelSources, LATEST, STABLE, read_approved
-from check_official_updates import write_outputs
+from approved_manager_builds import ChannelSources, LATEST, STABLE
+from check_official_updates import UpdateError, github_lookup, write_outputs
 from manager_lkm_jobs import load_ddk_matrix
 from manager_variants import MANAGERS
 from prebuilt_manager_history import named_artifacts, verified_artifact
-from resolve_build_sources import SHA, SourceResolutionError, validate_ref
+from resolve_build_sources import (REPOSITORIES, SHA, NoStableRelease, SourceResolutionError,
+                                   official_selection, validate_ref)
 from reusable_manager_apk import recipe_hash
 from wait_manager_identity import GitHubReader, IdentityError, positive_integer
 
@@ -114,6 +115,20 @@ def compact(document: dict) -> str:
     return json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
+def discover_channels() -> ChannelSources:
+    channels = {}
+    for variant in MANAGERS:
+        channels[variant] = {}
+        for tier, label in CHANNELS.items():
+            try:
+                channels[variant][tier] = github_lookup(variant + ' ' + label, official_selection,
+                                                        REPOSITORIES[variant], tier, '')
+            except NoStableRelease:
+                if tier != STABLE:
+                    raise
+    return channels
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='operation', required=True)
@@ -133,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output.write_text(compact(state_document(channels)) + '\n',
                                    encoding='utf-8', newline='\n')
         else:
-            selected = read_approved(ROOT)
+            selected = discover_channels()
             previous = load_previous(args.previous) if args.previous else {}
             if not previous and args.artifact_history_branch:
                 repository = os.environ['GITHUB_REPOSITORY']
@@ -150,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             if not os.environ.get('GITHUB_OUTPUT'):
                 print(compact(matrix))
             print(f"需预编译 {len(matrix['include'])} 组官方管理器 APK", file=sys.stderr)
-    except (OSError, ValueError, SourceResolutionError, IdentityError) as error:
+    except (OSError, ValueError, SourceResolutionError, UpdateError, IdentityError) as error:
         print(f'::error::管理器 APK 预编译来源检查失败。{error}', file=sys.stderr)
         return 1
     return 0

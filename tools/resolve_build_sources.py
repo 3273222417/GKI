@@ -306,6 +306,15 @@ def resolve_sources(root: Path, variant: str, tier: str, custom_ref: str = "", s
     return source_result(commit.lower(), repository, branch, tier)
 
 
+def frozen_channel_source(variant: str, tier: str, commit: str, branch: str) -> dict[str, str]:
+    """Reconstruct the selected official source without resolving a movable ref."""
+    if variant not in REPOSITORIES or tier not in ('Stable(标准)', 'Latest(最新)'):
+        raise SourceResolutionError('Invalid prebuild manager or channel')
+    if not isinstance(commit, str) or not SHA.fullmatch(commit) or commit != commit.lower():
+        raise SourceResolutionError('Prebuild requires the selected full lowercase commit SHA')
+    return source_result(commit, REPOSITORIES[variant], validate_ref(branch), tier)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
@@ -313,9 +322,16 @@ def main(argv=None) -> int:
     parser.add_argument("--tier", required=True, choices=sorted(TIERS))
     parser.add_argument("--custom-ref", default="")
     parser.add_argument("--susfs", required=True, choices=("true", "false"))
+    parser.add_argument("--fixed-ref")
+    parser.add_argument("--fixed-source-branch")
     args = parser.parse_args(argv)
     try:
-        result = resolve_sources(args.root, args.variant, args.tier, args.custom_ref, args.susfs == "true")
+        if args.fixed_ref is not None or args.fixed_source_branch is not None:
+            if args.fixed_ref is None or args.fixed_source_branch is None or args.custom_ref:
+                raise SourceResolutionError('Prebuild requires both a frozen commit and source branch')
+            result = frozen_channel_source(args.variant, args.tier, args.fixed_ref, args.fixed_source_branch)
+        else:
+            result = resolve_sources(args.root, args.variant, args.tier, args.custom_ref, args.susfs == "true")
         output = os.environ.get("GITHUB_OUTPUT")
         if output:
             with Path(output).open("a", encoding="utf-8", newline="\n") as stream:

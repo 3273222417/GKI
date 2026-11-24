@@ -18,7 +18,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 import uuid
 
 from pin_build_dependencies import CompatibilityError, load_profile
-from resolve_build_sources import (NoRedirect as GitHubNoRedirect, SourceResolutionError,
+from resolve_build_sources import (NoRedirect as GitHubNoRedirect, NoStableRelease, SourceResolutionError,
                                    github_commit, github_json, github_transport_repository, validate_ref)
 from shared_susfs_source import OFFICIAL as SUSFS_GIT_URL
 from snapshot_ksu_source import GitCommandError, SnapshotError, git
@@ -57,6 +57,8 @@ def github_lookup(label: str, function, *arguments, **keywords):
     for attempt in range(LOOKUP_ATTEMPTS):
         try:
             return function(*arguments, **keywords)
+        except NoStableRelease:
+            raise
         except SourceResolutionError as error:
             # Only these constant messages come from the shared HTTP client.
             # Ref, redirect, size and shape failures cannot be fixed by retries.

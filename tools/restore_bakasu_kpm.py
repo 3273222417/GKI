@@ -31,11 +31,17 @@ NATIVE_BUILD_INPUTS = {
     'kernel/tools/check_symbol.c': ('e1498452044010e383dd5a4d16993576337d28f91769b829ec416e76e22bfdc2',),
     'kernel/tools/code_generation/code_generation.mk': ('7216cdc24d5c6c5196ac53587ce79981d1ddc18f0d8d5c2e609b4cbd54b3871f',),
     'kernel/tools/code_generation/syscall_no/syscall_no.mk': ('5d65354bc6cc01fdb4c288ef69b5365e1b98cfe7619a8c942cbde99a3253b894',),
-    'kernel/tools/code_generation/syscall_no/syscall_no.c': ('92b1ef09e02b6b0c069c7ab2ffe64ddc90943df39f2f5963b83a29fcc0365226',),
+    'kernel/tools/code_generation/syscall_no/syscall_no.c': (
+        '92b1ef09e02b6b0c069c7ab2ffe64ddc90943df39f2f5963b83a29fcc0365226',
+        # 57b2db6 uses the upstream kernel compatibility wrapper.
+        'ce310e160a901a86295107ef71245a0c51f929815e7870e9eb2a4858e12bb865',
+    ),
     'kernel/tools/code_generation/preinit_runner/preinit_runner.mk': (
         '3461eaa72bd7ca96933fae3797b7f6e828c127ea042118dbc43d902361dd5c65',
         # 7b65bde uses make -f for headers_install; runner flags and outputs match.
         '39c3781b4ad2186ad2c11425e5c67a27f484808131f3a941f5572f49a78931eb',
+        # 57b2db6 adds explicit ELF segment alignment flags.
+        'bfce9084ef8bf76e5f92b1ef337f683f5e8dc0800d5f861f5d0c245daa1dec8c',
     ),
 }
 NATIVE_BUILD_OUTPUTS = frozenset((
@@ -51,6 +57,9 @@ SYSCALL_HEADER_PREFIX = ('/** Auto generated file. DO NOT EDIT **/\n\n#ifndef KS
                          '#define KSU_NR_COMPAT_H\n\n#include <asm/unistd.h>\n\n')
 SYSCALL_COMPAT_TAIL = ('#define ksu_get_syscall_no(name) (is_compat_task() ? __NR_compat32_##name : __NR_##name)\n'
                        '#define ksu_get_compat_syscall_no(name) __NR_compat32_##name\n\n#endif\n')
+SYSCALL_WRAPPED_PREFIX = SYSCALL_HEADER_PREFIX.replace('#include <asm/unistd.h>',
+    '#include "compat/kernel_compat.h"\n#include <asm/unistd.h>')
+SYSCALL_WRAPPED_TAIL = SYSCALL_COMPAT_TAIL.replace('(is_compat_task()', '(ksu_is_compat_task()')
 
 
 class KpmPortError(ValueError):
@@ -273,12 +282,13 @@ def native_syscall_header(data: bytes) -> None:
              '#define ksu_get_compat_syscall_no(name) \\\n'
              '({ BUILD_BUG_ON_MSG(1, "ksu_get_compat_syscall_no() requires CONFIG_COMPAT"); 0; })\n\n#endif\n')
     compat = '#include <asm/syscall.h>\n'
-    if text in (SYSCALL_HEADER_PREFIX + plain,
-                SYSCALL_HEADER_PREFIX + compat + '#include <asm/unistd_compat_32.h>\n\n' + SYSCALL_COMPAT_TAIL):
+    prefix, tail = ((SYSCALL_WRAPPED_PREFIX, SYSCALL_WRAPPED_TAIL) if text.startswith(SYSCALL_WRAPPED_PREFIX)
+                    else (SYSCALL_HEADER_PREFIX, SYSCALL_COMPAT_TAIL))
+    if text in (prefix + plain, prefix + compat + '#include <asm/unistd_compat_32.h>\n\n' + tail):
         return
-    if not text.startswith(SYSCALL_HEADER_PREFIX + compat) or not text.endswith('\n' + SYSCALL_COMPAT_TAIL):
+    if not text.startswith(prefix + compat) or not text.endswith('\n' + tail):
         raise KpmPortError('Unknown native BakaSU generated syscall header layout')
-    middle = text[len(SYSCALL_HEADER_PREFIX + compat):-len('\n' + SYSCALL_COMPAT_TAIL)].splitlines()
+    middle = text[len(prefix + compat):-len('\n' + tail)].splitlines()
     origin = re.fullmatch(r'/\*\* Generated from ([A-Za-z0-9_./+-]{1,2048}) \*\*/', middle[0]) if middle else None
     # srctree may be an absolute source directory or a relative path from
     # Kbuild's output directory. This is only the generator's comment: never

@@ -13,10 +13,76 @@ import sys
 import unittest
 from unittest import mock
 import uuid
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 import restore_bakasu_kpm as port
+
+
+class BakaKpmResourceTests(unittest.TestCase):
+    def test_reviewed_translations_survive_unrelated_upstream_resource_tail_additions(self):
+        manifest, patch = port.load_port_manifest()
+        items = [item for item in manifest['files'] if item['path'].endswith('/strings.xml')]
+        self.assertEqual(2, len(items))
+        # These are the original reviewed insertion blocks, including all 31
+        # translations and format placeholders. Only their location may move.
+        blocks = {
+            'values-zh-rCN': '920fdf21925d0f71da10229fb883a9537afe5c62a18724ce47accb13f342e19d',
+            'values': 'ce6c069eb734479755902304aa15f822d52ed5ec3a42e9a00c412b8469aa3593',
+        }
+        sections, insertions, originals = [], {}, {}
+        for item in items:
+            name = item['path']
+            section = ('diff --git a/' + name + ' b/' + name + '\n').encode() + patch.split(
+                ('diff --git a/' + name + ' b/' + name + '\n').encode(), 1)[1].split(b'\ndiff --git ', 1)[0]
+            if not section.endswith(b'\n'):
+                section += b'\n'
+            sections.append(section)
+            block = b''.join(line[1:] for line in section.splitlines(keepends=True)
+                             if line.startswith(b'+') and not line.startswith(b'+++'))
+            self.assertEqual(blocks[Path(name).parent.name], port.digest(block))
+            self.assertEqual(31, block.count(b'<string name='))
+            insertions[name] = block
+            originals[name] = (ROOT / 'tools/patches/bakasu-kpm-base' /
+                               (item['before_sha256'] + '.source')).read_bytes()
+            self.assertEqual(item['before_sha256'], port.digest(originals[name]))
+
+        def resources(data):
+            result = {}
+            for element in ET.fromstring(data):
+                self.assertNotIn(element.attrib['name'], result)
+                element.tail = None
+                result[element.attrib['name']] = ET.tostring(element)
+            return result
+
+        for append_upstream in (False, True):
+            with self.subTest(append_upstream=append_upstream), port.temporary_directory(
+                    ROOT.parent / '.gki-upstream-cache', 'bakasu-resource-test-') as source:
+                port.git(source, 'init', '-q')
+                before = {}
+                for name, original in originals.items():
+                    data = original
+                    if append_upstream:
+                        data = data.replace(b'</resources>',
+                            b'    <string name="unrelated_new_upstream_label">Upstream text %1$s</string>\n</resources>')
+                    before[name] = data
+                    path = source / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                port.git(source, 'add', '.')
+                port.git(source, '-c', 'user.name=Resource test', '-c', 'user.email=resource-test@example.invalid',
+                         '-c', 'commit.gpgsign=false', 'commit', '-qm', 'frozen resource fixture')
+                reference = port.git(source, 'rev-parse', 'HEAD').decode().strip()
+                _, after = port.expected_port(source, reference, {**manifest, 'files': items}, b''.join(sections))
+                for name in originals:
+                    old_resources, new_resources = resources(before[name]), resources(after[name])
+                    self.assertEqual(31, len(new_resources.keys() - old_resources.keys()))
+                    for key, value in old_resources.items():
+                        self.assertEqual(value, new_resources[key])
+                    self.assertIn(insertions[name], after[name])
+                    self.assertLess(after[name].index(insertions[name]), after[name].index(b'<string name="sulog">'))
+                self.assertFalse(port.git(source, 'status', '--porcelain').strip())
 
 
 class BakaKpmPortTests(unittest.TestCase):
@@ -427,6 +493,9 @@ class BakaKpmPortTests(unittest.TestCase):
         real = (head + origin + table + '\n' + port.SYSCALL_COMPAT_TAIL).encode()
         port.native_syscall_header(real)
         port.native_syscall_header(real.replace(b'\n', b'\r\n'))
+        wrapped = real.replace(port.SYSCALL_HEADER_PREFIX.encode(), port.SYSCALL_WRAPPED_PREFIX.encode()
+                               ).replace(port.SYSCALL_COMPAT_TAIL.encode(), port.SYSCALL_WRAPPED_TAIL.encode())
+        port.native_syscall_header(wrapped)
         cases = [real.replace(b' 191\t', b' arbitrary_function()\t'),
                  real.replace(b' 191\t', b' 191; unreviewed();\t'),
                  real.replace(b'#define __NR_compat32_restart_syscall 0', b'#include "unreviewed.h"'),
@@ -434,7 +503,9 @@ class BakaKpmPortTests(unittest.TestCase):
                  real.replace(b'/opt/ddk/kdir/', b'/unreviewed;escape/'),
                  real.replace(b'asm/unistd32.h', b'asm/unreviewed.h'),
                  real.replace(b'asm/unistd32.h', b'asm/unistd32.h */ injected /*'),
-                 real.replace(table.encode(), b''), real + b'void injected(void);\n']
+                 real.replace(table.encode(), b''), real + b'void injected(void);\n',
+                 wrapped.replace(b'"compat/kernel_compat.h"', b'"unreviewed.h"'),
+                 wrapped.replace(port.SYSCALL_WRAPPED_TAIL.encode(), port.SYSCALL_COMPAT_TAIL.encode())]
         for data in cases:
             with self.subTest(data=data[:100]), self.assertRaises(ValueError):
                 port.native_syscall_header(data)

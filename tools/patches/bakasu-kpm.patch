@@ -1316,11 +1316,13 @@ index 0000000..02d08fd
 +    }
 +}
 diff --git a/manager/app/src/main/res/values-zh-rCN/strings.xml b/manager/app/src/main/res/values-zh-rCN/strings.xml
-index 0efeaed..38b0941 100644
+index 0efeaed7ebeacf492688b7d8d00436b7813bfee7..fad9e2d5cc5351ef12f6abfab2d6969826d42ab1 100644
 --- a/manager/app/src/main/res/values-zh-rCN/strings.xml
 +++ b/manager/app/src/main/res/values-zh-rCN/strings.xml
-@@ -673,2 +673,35 @@
-     <string name="superuser_packages_load_failed">从 RootService 加载应用列表失败，请重试。</string>
+@@ -22,6 +22,39 @@
+     <string name="seccomp_status_unknown">未知</string>
+     <string name="unknown">未知</string>
+     <string name="superuser">超级用户</string>
 +
 +    <!-- Manual KPM management; capability is probed from the paired runtime. -->
 +    <string name="kpm_tab">KPM</string>
@@ -1354,13 +1356,17 @@ index 0efeaed..38b0941 100644
 +    <string name="kpm_embedded">模块已嵌入，重启后会自动加载</string>
 +    <string name="kpm_embedded_status">已嵌入</string>
 +    <string name="kpm_embedded_not_loaded">已嵌入，当前未加载；可卸载以取消开机加载。</string>
- </resources>
+     <string name="sulog">超级用户访问日志</string>
+     <string name="sulog_log_files">日志文件</string>
+     <string name="sulog_failed_to_load">加载日志文件失败</string>
 diff --git a/manager/app/src/main/res/values/strings.xml b/manager/app/src/main/res/values/strings.xml
-index 76c96a9..e084132 100644
+index 76c96a9da5e36351a8b591d42b6ff80c5349e2b1..abb90179051b1764d6ff3e3fdda9aeab9e546349 100644
 --- a/manager/app/src/main/res/values/strings.xml
 +++ b/manager/app/src/main/res/values/strings.xml
-@@ -677,2 +677,35 @@
-     <string name="superuser_packages_load_failed">Failed to load applications from RootService. Please retry.</string>
+@@ -22,6 +22,39 @@
+     <string name="seccomp_status_unknown">Unknown</string>
+     <string name="unknown">Unknown</string>
+     <string name="superuser">Superuser</string>
 +
 +    <!-- Manual KPM management; capability is probed from the paired runtime. -->
 +    <string name="kpm_tab">KPM</string>
@@ -1394,7 +1400,9 @@ index 76c96a9..e084132 100644
 +    <string name="kpm_embedded">Module embedded; it will load automatically after reboot</string>
 +    <string name="kpm_embedded_status">Embedded</string>
 +    <string name="kpm_embedded_not_loaded">Embedded but currently not loaded. Uninstall to disable loading at boot.</string>
- </resources>
+     <string name="sulog">SU log</string>
+     <string name="sulog_log_files">Log files</string>
+     <string name="sulog_failed_to_load">Failed to load SU log</string>
 diff --git a/uapi/feature.h b/uapi/feature.h
 index 55d0a7c..e3b296c 100644
 --- a/uapi/feature.h

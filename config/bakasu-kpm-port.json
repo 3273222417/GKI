@@ -4,8 +4,8 @@
   "audited_ref": "d5e9e025b8b49155f8014684d64c91742b465f65",
   "patch": {
     "filename": "bakasu-kpm.patch",
-    "size": 99721,
-    "sha256": "e42b2ac5d77d777ab985ba2b9be92f4fd707ff4236e72acfeb301cdcfc21aa68"
+    "size": 100256,
+    "sha256": "3974a51dfcd4406cfdfc2d410b16976803b96b7004dedca6e63209791b7c2e3b"
   },
   "files": [
     {
@@ -131,14 +131,14 @@
       "path": "manager/app/src/main/res/values-zh-rCN/strings.xml",
       "kind": "update",
       "before_sha256": "1cd558a879d9c2f0d25459a7daf7237b2f3e20ad87741a5f8ff85228ade445b7",
-      "after_sha256": "c119a614f8423515f738b114b022db949cf2910623d2411dcaed0fb606ec0a28",
+      "after_sha256": "0e68e933e0daf54c76a0fa362b9e73ab4c85ad73678f24397993ee0492aac21d",
       "after_size": 54577
     },
     {
       "path": "manager/app/src/main/res/values/strings.xml",
       "kind": "update",
       "before_sha256": "6e05000429612802291b1fdaebe89bdb6fbaa21bdfd4b33714caf1e84b6abff0",
-      "after_sha256": "92f9224f62419b4c07eb3d1f642e1ce6857b34bb311806181f71c57bb45ee424",
+      "after_sha256": "9afadf082256e9606572f37d74211fb37fd96ea80282eba7d5d03b85e7425375",
       "after_size": 56385
     },
     {

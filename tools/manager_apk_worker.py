@@ -52,18 +52,12 @@ def create_jobs(base):
             '矩阵展开前统一下载并固定 SUSFS', '自动删除已成功的清理记录'}
     prepare['steps'] = [step for step in prepare['steps'] if step.get('name') not in omit]
     source = next(step for step in prepare['steps'] if step.get('id') == 'sources')
+    source['env'].pop('GH_TOKEN')
+    source['env'].pop('CUSTOM_REF')
     source['env'].update(EXPECTED_REF='${{ matrix.reference }}', EXPECTED_SOURCE_BRANCH='${{ matrix.source_branch }}')
     source['run'] = '''set -euo pipefail
-python3 tools/resolve_build_sources.py --variant "$KSU_VARIANT" --tier "$KSU_TIER" --susfs true
-python3 - <<'PY'
-import os
-from pathlib import Path
-
-values = dict(line.split('=', 1) for line in Path(os.environ['GITHUB_OUTPUT']).read_text().splitlines() if '=' in line)
-if (values.get('ksu_ref') != os.environ['EXPECTED_REF']
-        or values.get('ksu_source_branch') != os.environ['EXPECTED_SOURCE_BRANCH']):
-    raise SystemExit('官方管理器版本在排队期间已变化，请重新检查后构建。')
-PY
+python3 tools/resolve_build_sources.py --variant "$KSU_VARIANT" --tier "$KSU_TIER" --susfs false \\
+  --fixed-ref "$EXPECTED_REF" --fixed-source-branch "$EXPECTED_SOURCE_BRANCH"
 '''
     prepare['needs'] = ['check-upstream']
     prepare['if'] = f"needs.check-upstream.result == 'success' && {DISCOVERY}pending == 'true'"
