@@ -674,24 +674,30 @@ class EmptyPrebuildTests(unittest.TestCase):
                  '记录已验证的官方版本状态']
         client.jobs_document = {'total_count': len(names), 'jobs': [
             {'id': 800 + index, 'run_id': self.run_id, 'name': name, 'status': 'completed',
-             'conclusion': 'success' if index == 0 else 'skipped'}
+             'conclusion': 'success' if index == 0 else 'skipped', 'steps': []}
             for index, name in enumerate(names)]}
+        client.jobs_by_attempt = {}
+        client.jobs_by_page = {}
         client.artifact_documents = [{'total_count': 0, 'artifacts': []}]
+        client.artifacts_by_page = {}
         client.artifact_reads = 0
         original = client.request
 
         def request(resource, *, method='GET', missing_ok=False):
-            special = resource in ('/actions/workflows/' + self.workflow,
-                                   self.jobs_path, self.artifacts_path)
+            job_match = re.fullmatch(r'/actions/runs/9/attempts/([1-9][0-9]*)/jobs\?per_page=100&page=([1-9][0-9]*)', resource)
+            artifact_match = re.fullmatch(r'/actions/runs/9/artifacts\?per_page=100&page=([1-9][0-9]*)', resource)
+            special = resource == '/actions/workflows/' + self.workflow or job_match or artifact_match
             if method == 'GET' and special:
                 client.calls.append((method, resource, missing_ok))
                 if resource == '/actions/workflows/' + self.workflow:
                     document = client.metadata
-                elif resource == self.jobs_path:
-                    document = client.jobs_document
+                elif job_match:
+                    attempt, page = map(int, job_match.groups())
+                    document = client.jobs_by_page.get((attempt, page),
+                        client.jobs_by_attempt.get(attempt, client.jobs_document))
                 else:
                     index = min(client.artifact_reads, len(client.artifact_documents) - 1)
-                    document = client.artifact_documents[index]
+                    document = client.artifacts_by_page.get(int(artifact_match[1]), client.artifact_documents[index])
                     client.artifact_reads += 1
                 if isinstance(document, Exception):
                     raise document
@@ -750,9 +756,8 @@ class EmptyPrebuildTests(unittest.TestCase):
                 self.assertEqual([], client.deleted)
                 self.assertEqual(0, client.artifact_reads)
 
-    def test_non_success_rerun_and_current_prebuilds_remain_protected(self):
-        for changes, current in (({'conclusion': 'failure'}, None), ({'run_attempt': 2}, None),
-                                 ({'status': 'in_progress'}, None), ({}, '9')):
+    def test_running_and_current_prebuilds_remain_protected_without_evidence_reads(self):
+        for changes, current in (({'status': 'in_progress'}, None), ({}, '9')):
             client = self.client(changes=changes)
             with self.subTest(changes=changes, current=current):
                 report = self.preview(client, execute=True, current_run_id=current)
@@ -760,9 +765,44 @@ class EmptyPrebuildTests(unittest.TestCase):
                 self.assertEqual([], client.deleted)
                 self.assertFalse(any(path == self.jobs_path for _, path, _ in client.calls))
 
+    def test_completed_first_attempt_failure_without_apk_is_a_candidate(self):
+        for conclusion in ('failure', 'cancelled', 'timed_out'):
+            client = self.client(changes={'conclusion': conclusion})
+            client.jobs_document['jobs'][0]['conclusion'] = 'failure'
+            with self.subTest(conclusion=conclusion):
+                report = self.preview(client)
+                self.assertEqual([9], report.plan.candidate_ids)
+                self.assertEqual([], report.plan.protected_workflow_run_ids)
+
+    def test_empty_rerun_checks_every_attempt_before_becoming_candidate(self):
+        client = self.client(changes={'run_attempt': 2, 'conclusion': 'failure'})
+        report = self.preview(client)
+        self.assertEqual([9], report.plan.candidate_ids)
+        self.assertIn(('GET', '/actions/runs/9/attempts/2/jobs?per_page=100&page=1', False), client.calls)
+
+    def test_second_failed_attempt_does_not_hide_first_attempt_apk_production(self):
+        for step in ('编译管理器与同版本 ksud', '签名并校验可安装 APK',
+                     '上传管理器安装包', '上传原始配套 APK'):
+            client = self.client(changes={'run_attempt': 2, 'conclusion': 'failure'})
+            first = copy.deepcopy(client.jobs_document)
+            first['jobs'][3].update(conclusion='failure', steps=[{'name': step, 'conclusion': 'success'}])
+            client.jobs_by_attempt[1] = first
+            with self.subTest(step=step):
+                report = self.preview(client, execute=True)
+                self.assertEqual([9], report.plan.protected_workflow_run_ids)
+                self.assertEqual([], client.deleted)
+
+    def test_apk_recovery_check_success_without_upload_does_not_prove_production(self):
+        client = self.client(changes={'conclusion': 'failure'})
+        client.jobs_document['jobs'][1].update(conclusion='failure', steps=[
+            {'name': '核验已编译 APK 并保留原始编译记录', 'conclusion': 'success'},
+            {'name': '上传原始配套 APK', 'conclusion': 'skipped'}])
+        report = self.preview(client)
+        self.assertEqual([9], report.plan.candidate_ids)
+
     def test_incomplete_or_ambiguous_job_evidence_preserves_run(self):
-        for change in ('count', 'bool_count', 'missing', 'duplicate_discovery', 'discovery_failed',
-                       'worker_started', 'no_apk_job', 'wrong_run', 'not_completed', 'read_failed'):
+        for change in ('count', 'bool_count', 'missing', 'duplicate_id', 'steps_missing',
+                       'steps_invalid', 'unknown_history', 'wrong_run', 'not_completed', 'read_failed'):
             client = self.client()
             document = client.jobs_document
             if change == 'count':
@@ -771,14 +811,15 @@ class EmptyPrebuildTests(unittest.TestCase):
                 document['total_count'] = True
             elif change == 'missing':
                 del document['jobs']
-            elif change == 'duplicate_discovery':
-                document['jobs'][1]['name'] = cleanup.PREBUILD_DISCOVERY
-            elif change == 'discovery_failed':
-                document['jobs'][0]['conclusion'] = 'failure'
-            elif change == 'worker_started':
-                document['jobs'][1]['conclusion'] = 'success'
-            elif change == 'no_apk_job':
-                document['jobs'][3]['name'] = 'unknown old worker'
+            elif change == 'duplicate_id':
+                document['jobs'][1]['id'] = document['jobs'][0]['id']
+            elif change == 'steps_missing':
+                del document['jobs'][1]['steps']
+            elif change == 'steps_invalid':
+                document['jobs'][1]['steps'] = None
+            elif change == 'unknown_history':
+                for job in document['jobs']:
+                    job['name'] = 'unknown old worker'
             elif change == 'wrong_run':
                 document['jobs'][1]['run_id'] = 10
             elif change == 'not_completed':
@@ -790,11 +831,12 @@ class EmptyPrebuildTests(unittest.TestCase):
                 self.assertEqual([9], report.plan.protected_workflow_run_ids)
                 self.assertEqual([], client.deleted)
 
-    def test_any_artifact_or_unknown_artifact_inventory_preserves_prebuild(self):
+    def test_apk_artifact_including_expired_or_unknown_inventory_preserves_prebuild(self):
         documents = [None, {}, {'total_count': False, 'artifacts': []},
                      {'total_count': 1, 'artifacts': []},
-                     {'total_count': 0, 'artifacts': [{'id': 1, 'expired': True}]},
-                     {'total_count': 1, 'artifacts': [{'id': 1, 'expired': True}]},
+                     {'total_count': 0, 'artifacts': [{'id': 1, 'name': 'manager.apk', 'expired': True}]},
+                     {'total_count': 1, 'artifacts': [{'id': 1, 'name': 'manager.apk', 'expired': True}]},
+                     {'total_count': 1, 'artifacts': [{'id': 1, 'name': 'manager.apk', 'expired': False}]},
                      cleanup.CleanupError('GitHub API GET failed (HTTP 503)')]
         for document in documents:
             client = self.client()
@@ -804,8 +846,45 @@ class EmptyPrebuildTests(unittest.TestCase):
                 self.assertEqual([9], report.plan.protected_workflow_run_ids)
                 self.assertEqual([], client.deleted)
 
+    def test_non_apk_state_and_native_artifacts_do_not_protect_empty_prebuild(self):
+        client = self.client()
+        artifacts = [{'id': 1, 'name': 'gki-manager-apk-observations.json'},
+                     {'id': 2, 'name': 'internal-manager-native-SukiSU-android14-6.1'}]
+        client.artifact_documents = [{'total_count': len(artifacts), 'artifacts': artifacts}]
+        report = self.preview(client)
+        self.assertEqual([9], report.plan.candidate_ids)
+
+    def test_later_artifact_page_apk_preserves_prebuild(self):
+        client = self.client()
+        first = [{'id': value, 'name': f'state-{value}.json'} for value in range(1, 101)]
+        client.artifacts_by_page = {
+            1: {'total_count': 101, 'artifacts': first},
+            2: {'total_count': 101, 'artifacts': [{'id': 101, 'name': 'manager.apk', 'expired': True}]}}
+        report = self.preview(client)
+        self.assertEqual([9], report.plan.protected_workflow_run_ids)
+        self.assertIn(('GET', '/actions/runs/9/artifacts?per_page=100&page=2', False), client.calls)
+
+    def test_later_jobs_page_producer_success_preserves_prebuild(self):
+        client = self.client()
+        template = client.jobs_document['jobs'][0]
+        first = [{**template, 'id': value} for value in range(1, 101)]
+        producer = {**template, 'id': 101, 'steps': [
+            {'name': '上传管理器安装包', 'conclusion': 'success'}]}
+        client.jobs_by_page = {(1, 1): {'total_count': 101, 'jobs': first},
+                               (1, 2): {'total_count': 101, 'jobs': [producer]}}
+        report = self.preview(client)
+        self.assertEqual([9], report.plan.protected_workflow_run_ids)
+        self.assertIn(('GET', '/actions/runs/9/attempts/1/jobs?per_page=100&page=2', False), client.calls)
+
+    def test_incomplete_previous_attempt_preserves_failed_rerun(self):
+        client = self.client(changes={'run_attempt': 2, 'conclusion': 'failure'})
+        client.jobs_by_attempt[1] = cleanup.CleanupError('GitHub API GET failed (HTTP 404)')
+        report = self.preview(client, execute=True)
+        self.assertEqual([9], report.plan.protected_workflow_run_ids)
+        self.assertEqual([], client.deleted)
+
     def test_artifact_appearing_or_evidence_failure_before_delete_restores_protection(self):
-        for document in ({'total_count': 1, 'artifacts': [{'id': 1}]}, {},
+        for document in ({'total_count': 1, 'artifacts': [{'id': 1, 'name': 'manager.apk'}]}, {},
                          cleanup.CleanupError('GitHub API GET failed (HTTP 503)')):
             client = self.client()
             client.artifact_documents.append(document)

@@ -27,6 +27,10 @@ DEFAULT_KEEP = 0
 DEFAULT_EXCLUDE_WORKFLOW = 'cleanup-build-history.yml'
 PREBUILD_WORKFLOW = 'prebuild-manager-apks.yml'
 PREBUILD_DISCOVERY = '确定六种管理器的正式版与最新版'
+APK_PRODUCER_STEPS = frozenset(('编译管理器与同版本 ksud', '签名并校验可安装 APK',
+                                '上传管理器安装包', '上传原始配套 APK'))
+MAX_PREBUILD_PAGES = 10
+MAX_PREBUILD_ATTEMPTS = 10
 CONCLUSIONS = frozenset(('success', 'failure', 'neutral', 'cancelled', 'skipped',
                          'timed_out', 'action_required', 'stale', 'startup_failure'))
 MAX_RESPONSE = 16 * 1024 * 1024
@@ -98,7 +102,8 @@ class GitHub:
         repository_listing = re.fullmatch(r'/actions/runs\?per_page=100&page=[1-9][0-9]*', resource)
         releases = re.fullmatch(r'/releases\?per_page=100&page=[1-9][0-9]*', resource)
         prebuild_evidence = re.fullmatch(
-            r'/actions/runs/[1-9][0-9]*/(?:attempts/1/jobs|artifacts)\?per_page=100&page=1', resource)
+            r'/actions/runs/[1-9][0-9]*/(?:attempts/[1-9][0-9]*/jobs|artifacts)\?per_page=100&page=[1-9][0-9]*',
+            resource)
         if method not in ('GET', 'DELETE') or not (
                 run_path or (method == 'GET' and (listing or repository_listing or releases or prebuild_evidence))):
             raise CleanupError('Only workflow/run paths and read-only Release listing are allowed')
@@ -355,29 +360,59 @@ class CleanupReport:
                 'error': self.error}
 
 
+def prebuild_inventory(client, path, field):
+    rows, seen, total = [], set(), None
+    for page in range(1, MAX_PREBUILD_PAGES + 1):
+        document = client.request(path + f'?per_page=100&page={page}')
+        if not isinstance(document, dict):
+            raise CleanupError('Prebuild evidence is not an object')
+        count, batch = document.get('total_count'), document.get(field)
+        if (type(count) is not int or not 0 <= count <= MAX_PREBUILD_PAGES * 100
+                or total not in (None, count) or not isinstance(batch, list) or len(batch) > 100):
+            raise CleanupError('Prebuild evidence is incomplete or changed during pagination')
+        total = count
+        for row in batch:
+            if (not isinstance(row, dict) or not positive_id(row.get('id')) or row['id'] in seen
+                    or not isinstance(row.get('name'), str) or not row['name']):
+                raise CleanupError('Prebuild evidence has an invalid or duplicate identity')
+            seen.add(row['id'])
+        rows.extend(batch)
+        if len(batch) < 100 or len(rows) >= count:
+            if len(rows) == count:
+                return rows
+            break
+    raise CleanupError('Prebuild inventory ended before its advertised count')
+
+
 def empty_prebuild(client, run):
-    """Require completed discovery, skipped workers and no artifacts."""
-    if run['status'] != 'completed' or run['conclusion'] != 'success' or run.get('run_attempt') != 1:
+    """Confirm that no attempt produced a manager APK, including expired outputs."""
+    attempts = run.get('run_attempt')
+    if run['status'] != 'completed' or not positive_id(attempts) or attempts > MAX_PREBUILD_ATTEMPTS:
         return False
     run_path = f"/actions/runs/{run['id']}"
     try:
-        jobs = client.request(run_path + '/attempts/1/jobs?per_page=100&page=1')
-        if not isinstance(jobs, dict):
+        if any(row['name'].casefold().endswith('.apk')
+               for row in prebuild_inventory(client, run_path + '/artifacts', 'artifacts')):
             return False
-        count, rows = jobs.get('total_count'), jobs.get('jobs')
-        if (type(count) is not int or not 2 <= count <= 100 or not isinstance(rows, list) or len(rows) != count
-                or any(not isinstance(job, dict) or job.get('run_id') != run['id']
-                       or job.get('status') != 'completed' or not isinstance(job.get('name'), str) for job in rows)):
-            return False
-        discovery = [job for job in rows if job['name'] == PREBUILD_DISCOVERY]
-        workers = [job for job in rows if job['name'] != PREBUILD_DISCOVERY]
-        if (len(discovery) != 1 or discovery[0].get('conclusion') != 'success'
-                or not any('预编译管理器 APK' in job['name'] for job in workers)
-                or any(job.get('conclusion') != 'skipped' for job in workers)):
-            return False
-        artifacts = client.request(run_path + '/artifacts?per_page=100&page=1')
-        return (isinstance(artifacts, dict) and type(artifacts.get('total_count')) is int
-                and artifacts['total_count'] == 0 and artifacts.get('artifacts') == [])
+        for attempt in range(1, attempts + 1):
+            jobs = prebuild_inventory(client, f'{run_path}/attempts/{attempt}/jobs', 'jobs')
+            known = False
+            for job in jobs:
+                steps = job.get('steps')
+                if job.get('run_id') != run['id'] or job.get('status') != 'completed' or not isinstance(steps, list):
+                    return False
+                known |= job['name'] == PREBUILD_DISCOVERY or '预编译管理器 APK' in job['name']
+                for step in steps:
+                    if (not isinstance(step, dict) or not isinstance(step.get('name'), str)
+                            or not isinstance(step.get('conclusion'), str) or step['conclusion'] not in CONCLUSIONS):
+                        return False
+                    if step['name'] in APK_PRODUCER_STEPS:
+                        if step['conclusion'] == 'success':
+                            return False
+                        known = True
+            if jobs and not known:
+                return False
+        return True
     except CleanupError:
         return False
 
@@ -393,19 +428,17 @@ def protected_runs(client, runs, workflow, *, release_ids, current_run_id):
         raise CleanupError('Protected workflow metadata is missing a valid ID')
     path = f'{client.repository}/.github/workflows/{workflow}'.casefold()
     protected = {run['id'] for run in runs if run['workflow_id'] == metadata['id']}
-    empty = set()
-    if workflow == PREBUILD_WORKFLOW and metadata.get('path') == f'.github/workflows/{PREBUILD_WORKFLOW}':
-        empty = {run['id'] for run in runs if run['id'] in protected and run['id'] not in release_ids
-                 and not preservation_reason(run, current_run_id) and empty_prebuild(client, run)}
-    # Preserve bootstrap runs from when the APK workflow ran as a push-only
-    # job within the upstream checker. Its pinned path is reported by GitHub.
+    # Include historical runs that call the exact same APK workflow.
     for run in runs:
         references = run.get('referenced_workflows')
         if run.get('event') == 'push' and isinstance(references, list) and any(
                 isinstance(item, dict) and isinstance(item.get('path'), str)
                 and item['path'].partition('@')[0].casefold() == path for item in references):
             protected.add(run['id'])
-            empty.discard(run['id'])
+    empty = set()
+    if workflow == PREBUILD_WORKFLOW and metadata.get('path') == f'.github/workflows/{PREBUILD_WORKFLOW}':
+        empty = {run['id'] for run in runs if run['id'] in protected and run['id'] not in release_ids
+                 and not preservation_reason(run, current_run_id) and empty_prebuild(client, run)}
     return protected - empty, empty
 
 
@@ -443,12 +476,10 @@ def cleanup(client, workflow=DEFAULT_WORKFLOW, *, keep=DEFAULT_KEEP, current_run
                     or any(current.get(key) != original[run_id].get(key)
                            for key in ('run_attempt', 'head_sha'))):
                 raise CleanupError('An old run changed before deletion; remaining runs preserved')
-            # A draft may have been published after the initial plan. Refresh
-            # the complete Release inventory immediately before every DELETE;
-            # a failed page aborts cleanup rather than using stale protection.
-            release_ids.update(fetch_release_run_ids(client, runs))
             if run_id in empty_prebuilds and run_id not in release_ids and not empty_prebuild(client, current):
                 protected.add(run_id)
+            # A draft may have been published after the initial plan.
+            release_ids.update(fetch_release_run_ids(client, runs))
             finished = set(report.deleted_ids + report.gone_ids)
             refreshed = plan_runs([run for run in runs if run['id'] not in finished], keep=keep,
                                   current_run_id=current_run_id, workflow_id=workflow_id,
