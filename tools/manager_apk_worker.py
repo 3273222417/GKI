@@ -5,7 +5,7 @@ import copy
 import re
 
 from manager_lkm_jobs import KMIS, lkm_cache_key
-from manager_prebuild import CHANNELS, slot_for
+from manager_prebuild import BUILD_CHANNELS, slot_for
 from manager_variants import MANAGERS
 from reuse_manager_jobs import expression
 
@@ -14,7 +14,8 @@ PREPARE = 'prebuild-manager-sources'
 NATIVE = 'prebuild-manager-native'
 MANAGER = 'prebuild-manager-apks'
 DISCOVERY = 'needs.check-upstream.outputs.manager_prebuild_'
-SLOTS = tuple(slot_for(variant, tier) for variant in MANAGERS for tier in CHANNELS)
+NATIVE_LAYOUT = 'select-native-builds'
+SLOTS = tuple(slot_for(variant, channel) for variant in MANAGERS for channel in BUILD_CHANNELS)
 SUBSTITUTIONS = {
     'inputs.kernelsu_variant': 'matrix.variant',
     'inputs.kernelsu_branch': 'matrix.tier',
@@ -41,6 +42,32 @@ def substitute(value):
 def matrix_job(job, matrix, maximum):
     job['strategy'] = {'fail-fast': False, 'max-parallel': maximum,
                        'matrix': expression('fromJSON(' + DISCOVERY + matrix + ')')}
+
+
+def route_native_jobs(native, manager, *, candidate_matrix, adoption, routing):
+    """Compute the remaining native jobs before GitHub expands its matrix."""
+    selector = {
+        'name': '安排未命中的 APK 构建', 'needs': list(native['needs']), 'if': native['if'],
+        'runs-on': 'ubuntu-24.04', 'timeout-minutes': 5, 'permissions': {'contents': 'read'},
+        'outputs': {field: expression('steps.layout.outputs.' + field)
+                    for field in ('native_matrix', 'native_count')},
+        'steps': [
+            {'name': '检出构建工具', 'uses': 'actions/checkout@v6', 'with': {'persist-credentials': False}},
+            {'name': '只展开缺少配套 APK 的原生目标', 'id': 'layout',
+             'env': {'NATIVE_MATRIX': expression(candidate_matrix),
+                     'ADOPTED': ' '.join(expression(f"{output} != '' && '{item}' || ''")
+                                         for item, output in adoption.items())},
+             'run': f'python3 tools/manager_matrix_layout.py --native-only {routing}'},
+        ],
+    }
+    result = 'needs.' + NATIVE_LAYOUT + '.result'
+    outputs = 'needs.' + NATIVE_LAYOUT + '.outputs.'
+    native['needs'].append(NATIVE_LAYOUT)
+    native['if'] += f" && {result} == 'success' && {outputs}native_count != '0'"
+    native['strategy']['matrix'] = expression(f'fromJSON({outputs}native_matrix)')
+    manager['needs'].append(NATIVE_LAYOUT)
+    manager['if'] += f" && ({result} == 'success' || {result} == 'skipped')"
+    return selector
 
 
 def use_native_cache(native, manager):
@@ -159,4 +186,8 @@ python3 tools/resolve_build_sources.py --variant "$KSU_VARIANT" --tier "$KSU_TIE
     manager['steps'] = [step for step in manager['steps'] if step.get('id') != 'manager-producer']
     manager.pop('outputs', None)
     use_native_cache(native, manager)
-    return dict(zip((PREPARE, NATIVE, MANAGER), substitute([prepare, native, manager])))
+    prepare, native, manager = substitute([prepare, native, manager])
+    layout = route_native_jobs(native, manager, candidate_matrix=DISCOVERY + 'lkm_matrix', routing='slot',
+                               adoption={slot: f"needs.{PREPARE}.outputs['{slot}_manager_adoption']"
+                                         for slot in SLOTS})
+    return {PREPARE: prepare, NATIVE_LAYOUT: layout, NATIVE: native, MANAGER: manager}

@@ -18,8 +18,9 @@ from approved_manager_builds import APPROVED_PATH
 from check_official_updates import LOOKUP_ATTEMPTS, UpdateError
 from generate_workflow import create_workflow
 from manager_lkm_jobs import KMIS
-from manager_prebuild import (LATEST, STABLE, STATE_ARTIFACT, main, plan,
-                              restore_previous, validate_state)
+from manager_prebuild import (BUILD_CHANNELS, LATEST, PAIRED_LATEST, PAIRED_STABLE, STABLE,
+                              STATE_ARTIFACT, discover_channels, main, plan,
+                              restore_previous, slot_for, validate_state)
 from manager_prebuild_workflow import OUTPUT, STATE_KEY, UPDATER_PATH, prebuild_workflow
 from manager_variants import MANAGERS
 from prebuilt_manager_history import WORKFLOW_API, WORKFLOW_PATH, run_artifacts, successful_runs, verified_artifact
@@ -117,6 +118,82 @@ class ManagerPrebuildTest(unittest.TestCase):
         matrix, _ = plan(channels, validate_state(observed))
         self.assertEqual([row['variant'] for row in matrix['include']], ['FinaSU'])
 
+    def test_reviewed_sources_have_independent_slots_and_real_build_tiers(self):
+        channels = approved_channels()
+        channels['SukiSU'][PAIRED_STABLE] = (ref(91), 'v3.0.0')
+        channels['SukiSU'][PAIRED_LATEST] = (ref(92), 'main')
+        matrix, state = plan(channels, {})
+        paired = [row for row in matrix['include'] if '_paired_' in row['slot']]
+        self.assertEqual([(row['tier'], row['slot'], row['reference']) for row in paired],
+                         [(STABLE, 'sukisu_paired_stable', ref(91)),
+                          (LATEST, 'sukisu_paired_latest', ref(92))])
+        self.assertEqual([row['channels'] for row in paired],
+                         [BUILD_CHANNELS[PAIRED_STABLE], BUILD_CHANNELS[PAIRED_LATEST]])
+        self.assertEqual(validate_state(state), channels)
+        self.assertEqual(state['schema_version'], 3)
+
+    def test_identical_reviewed_and_official_sources_share_the_official_task(self):
+        channels = approved_channels()
+        channels['SukiSU'][PAIRED_STABLE] = channels['SukiSU'][STABLE]
+        channels['SukiSU'][PAIRED_LATEST] = channels['SukiSU'][LATEST]
+        matrix, _ = plan(channels, {})
+        self.assertEqual(10, len(matrix['include']))
+        rows = [row for row in matrix['include'] if row['variant'] == 'SukiSU']
+        self.assertEqual([row['slot'] for row in rows], ['sukisu_stable', 'sukisu_latest'])
+        self.assertEqual(rows[0]['channels'], '正式版 / ' + BUILD_CHANNELS[PAIRED_STABLE])
+        self.assertEqual(rows[1]['channels'], '最新版 / ' + BUILD_CHANNELS[PAIRED_LATEST])
+
+    def test_new_reviewed_keys_do_not_rebuild_sources_in_existing_schema3_state(self):
+        channels = approved_channels()
+        _, old_state = plan(channels, {})
+        previous = validate_state(old_state)
+        channels['SukiSU'][PAIRED_STABLE] = channels['SukiSU'][STABLE]
+        channels['SukiSU'][PAIRED_LATEST] = channels['SukiSU'][LATEST]
+        matrix, state = plan(channels, previous)
+        self.assertEqual({'include': []}, matrix)
+        self.assertEqual(old_state['schema_version'], state['schema_version'])
+        self.assertNotEqual(old_state, state)
+
+    def test_reviewed_previous_official_version_is_not_rebuilt_when_upstream_moves(self):
+        channels = approved_channels()
+        previous = {variant: dict(tiers) for variant, tiers in channels.items()}
+        channels['SukiSU'][PAIRED_LATEST] = previous['SukiSU'][LATEST]
+        channels['SukiSU'][LATEST] = (ref(93), 'dev')
+        matrix, _ = plan(channels, previous)
+        self.assertEqual([(row['variant'], row['slot'], row['reference']) for row in matrix['include']],
+                         [('SukiSU', 'sukisu_latest', ref(93))])
+
+    def test_reviewed_deduplication_requires_the_exact_reference_and_branch(self):
+        channels = approved_channels()
+        channels['SukiSU'][PAIRED_STABLE] = (ref(94), 'v3.0.0')
+        channels['SukiSU'][PAIRED_LATEST] = (ref(94), 'main')
+        matrix, _ = plan(channels, {})
+        paired = [row for row in matrix['include'] if '_paired_' in row['slot']]
+        self.assertEqual([row['source_branch'] for row in paired], ['v3.0.0', 'main'])
+        previous = {variant: dict(tiers) for variant, tiers in channels.items()}
+        previous['SukiSU'].pop(PAIRED_LATEST)
+        matrix, _ = plan(channels, previous)
+        self.assertEqual([row['slot'] for row in matrix['include']], ['sukisu_paired_latest'])
+
+    def test_two_reviewed_channels_with_identical_source_share_one_paired_slot(self):
+        channels = approved_channels()
+        channels['SukiSU'][PAIRED_STABLE] = channels['SukiSU'][PAIRED_LATEST] = (ref(95), 'v3.0.0')
+        matrix, state = plan(channels, {})
+        paired = [row for row in matrix['include'] if '_paired_' in row['slot']]
+        self.assertEqual(len(paired), 1)
+        self.assertEqual(paired[0]['slot'], slot_for('SukiSU', PAIRED_STABLE))
+        self.assertEqual(paired[0]['channels'], ' / '.join(BUILD_CHANNELS[key]
+                         for key in (PAIRED_STABLE, PAIRED_LATEST)))
+        self.assertEqual(plan(channels, validate_state(state))[0], {'include': []})
+
+    def test_official_channel_changes_keep_the_existing_channel_specific_rebuild_rule(self):
+        channels = approved_channels()
+        previous = {variant: dict(tiers) for variant, tiers in channels.items()}
+        previous['SukiSU'][PAIRED_LATEST] = (ref(96), 'dev')
+        channels['SukiSU'][LATEST] = (ref(96), 'dev')
+        matrix, _ = plan(channels, previous)
+        self.assertEqual([row['slot'] for row in matrix['include']], ['sukisu_latest'])
+
     def test_discovery_queues_updated_official_sources_without_waiting_for_sync(self):
         channels = approved_channels()
         previous = {variant: dict(tiers) for variant, tiers in channels.items()}
@@ -130,7 +207,7 @@ class ManagerPrebuildTest(unittest.TestCase):
             return channels[variant][tier]
 
         with patch('manager_prebuild.official_selection', side_effect=lookup), \
-                patch('approved_manager_builds.read_approved', side_effect=AssertionError('Old approved pin read')), \
+                patch('manager_prebuild.read_approved', return_value=previous), \
                 patch('manager_prebuild.load_previous', return_value=previous), \
                 patch('manager_prebuild.write_outputs') as outputs, \
                 patch.dict('os.environ', {'GITHUB_OUTPUT': 'test-output'}):
@@ -156,10 +233,36 @@ class ManagerPrebuildTest(unittest.TestCase):
             return channels[variant][tier]
 
         with patch('manager_prebuild.official_selection', side_effect=lookup) as official, \
+                patch('manager_prebuild.read_approved', return_value=channels), \
                 patch('check_official_updates.time.sleep') as sleep:
-            self.assertEqual(channels, discover_channels())
+            discovered = discover_channels()
+        for variant, selected in channels.items():
+            for tier, identity in selected.items():
+                self.assertEqual(identity, discovered[variant][tier])
+                paired = PAIRED_STABLE if tier == STABLE else PAIRED_LATEST
+                self.assertEqual(identity, discovered[variant][paired])
         self.assertEqual(len(MANAGERS) * 2, official.call_count)
         sleep.assert_not_called()
+
+    def test_discovery_keeps_live_official_channels_and_adds_the_distinct_reviewed_pair(self):
+        official = approved_channels()
+        reviewed = {variant: dict(tiers) for variant, tiers in official.items()}
+        reviewed['SukiSU'][LATEST] = (ref(97), 'main')
+        reviewed['BakaSU'][STABLE] = (ref(98), 'v1.0')
+
+        def lookup(repository, tier, custom_ref):
+            variant = next(name for name in MANAGERS if REPOSITORIES[name] == repository)
+            if tier not in official[variant]:
+                raise NoStableRelease('No official release')
+            return official[variant][tier]
+
+        with patch('manager_prebuild.official_selection', side_effect=lookup), \
+                patch('manager_prebuild.read_approved', return_value=reviewed):
+            selected = discover_channels()
+        self.assertEqual(official['SukiSU'][LATEST], selected['SukiSU'][LATEST])
+        self.assertEqual((ref(97), 'main'), selected['SukiSU'][PAIRED_LATEST])
+        self.assertNotIn(STABLE, selected['BakaSU'])
+        self.assertEqual((ref(98), 'v1.0'), selected['BakaSU'][PAIRED_STABLE])
 
     def test_transient_official_failure_is_bounded_and_never_becomes_missing_stable(self):
         from manager_prebuild import discover_channels
@@ -295,8 +398,13 @@ class ManagerPrebuildTest(unittest.TestCase):
         self.assertIn('--fixed-ref "$EXPECTED_REF" --fixed-source-branch "$EXPECTED_SOURCE_BRANCH"', frozen['run'])
         self.assertNotIn('GH_TOKEN', frozen['env'])
         self.assertNotIn('CUSTOM_REF', frozen['env'])
-        self.assertIn('manager_prebuild_lkm_matrix', workflow['jobs']['prebuild-manager-native']['strategy']['matrix'])
-        self.assertEqual(len(MANAGERS) * 2, workflow['jobs']['prebuild-manager-apks']['strategy']['max-parallel'])
+        route = workflow['jobs']['select-native-builds']
+        layout = next(step for step in route['steps'] if step.get('id') == 'layout')
+        self.assertIn('manager_prebuild_lkm_matrix', layout['env']['NATIVE_MATRIX'])
+        self.assertEqual('${{ fromJSON(needs.select-native-builds.outputs.native_matrix) }}',
+                         workflow['jobs']['prebuild-manager-native']['strategy']['matrix'])
+        self.assertEqual(len(MANAGERS) * len(BUILD_CHANNELS),
+                         workflow['jobs']['prebuild-manager-apks']['strategy']['max-parallel'])
         self.assertTrue(all('uses' not in workflow['jobs'][name] for name in (
             'prebuild-manager-sources', 'prebuild-manager-native', 'prebuild-manager-apks')))
         recorder = workflow['jobs']['record-manager-prebuild']
@@ -317,8 +425,9 @@ class ManagerPrebuildTest(unittest.TestCase):
                                     json.dumps(jobs[name])))
             self.assertTrue(fields)
             for variant in MANAGERS:
-                for tier in ('stable', 'latest'):
-                    self.assertLessEqual({f'{variant.lower()}_{tier}_{field}' for field in fields}, source['outputs'].keys())
+                for channel in BUILD_CHANNELS:
+                    slot = slot_for(variant, channel)
+                    self.assertLessEqual({f'{slot}_{field}' for field in fields}, source['outputs'].keys())
         for variant in MANAGERS:
             self.assertIn('steps.lkm-matrix.outputs.matrix', source['outputs'][variant.lower() + '_latest_ddk_matrix'])
 

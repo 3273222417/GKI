@@ -11,6 +11,11 @@ ADOPTION = 'needs.prepare-matrix.outputs.manager_adoption'
 SAVE_KEY = "format('{0}-{1}-{2}', needs.prepare-matrix.outputs.apk_cache_key, github.run_id, github.run_attempt)"
 ELIGIBLE = ("(steps.sources.outputs.effective_ksu_branch == 'Stable(标准)' || "
             "steps.sources.outputs.effective_ksu_branch == 'Latest(最新)')")
+VERSION_KEY = 'steps.apk-cache-key.outputs.apk_version_cache_key'
+LEGACY_KEY = 'steps.apk-cache-key.outputs.apk_cache_key'
+PREPARE_KEY = f"format('{{0}}-{{1}}-{{2}}', {VERSION_KEY} || {LEGACY_KEY}, github.run_id, github.run_attempt)"
+INDEX_ADOPTED = (f"steps.adopt-apk.outputs.manager_apk_reused == 'true' && {VERSION_KEY} != '' && "
+                 f"!startsWith(steps.apk-cache.outputs.cache-matched-key, format('{{0}}-', {VERSION_KEY}))")
 ARGS = '''--variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \\
   --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \\
   --source-identity "$MANAGER_SOURCE_IDENTITY"'''
@@ -40,14 +45,17 @@ def configure(workflow):
     }
     index = next(i for i, step in enumerate(prepare['steps']) if step.get('id') == 'source-identity') + 1
     prepare['steps'][index:index] = [
-        {'name': '确定配套 APK 的复用条件', 'id': 'apk-cache-key', 'if': ALL_IF + ' && ' + ELIGIBLE,
-         'env': identity_env, 'run': 'python3 tools/reusable_manager_apk.py key ' + ARGS},
-        {'name': '读取相同源码和签名的已编译 APK', 'id': 'apk-cache', 'uses': 'actions/cache/restore@v5',
+        {'name': '按管理器版本定位已编译 APK', 'id': 'apk-cache-key', 'if': ALL_IF + ' && ' + ELIGIBLE,
+         'env': identity_env, 'run': 'set -euo pipefail\npython3 tools/reusable_manager_apk.py key ' + ARGS
+                + '\npython3 tools/restore_prebuilt_manager_apk.py --write-version-key ' + ARGS
+                + ' --source-dir ksu-snapshot-source'},
+        {'name': '直接读取匹配版本的已编译 APK', 'id': 'apk-cache', 'uses': 'actions/cache/restore@v5',
          'if': "steps.apk-cache-key.outputs.apk_cache_key != ''", 'timeout-minutes': 2,
          'continue-on-error': True,
          'with': {'path': CACHE_PATH,
-                  'key': expression("format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_cache_key, github.run_id, github.run_attempt)"),
-                  'restore-keys': expression("format('{0}-', steps.apk-cache-key.outputs.apk_cache_key)")}},
+                  'key': expression(PREPARE_KEY),
+                  'restore-keys': expression(f"{VERSION_KEY} != '' && format('{{0}}-', {VERSION_KEY}) || ''")
+                                  + '\n' + expression(f"format('{{0}}-', {LEGACY_KEY})")}},
         {'name': '核验已编译 APK 并保留原始编译记录', 'id': 'adopt-apk',
          'if': "steps.apk-cache-key.outputs.apk_cache_key != ''", 'timeout-minutes': 4,
          'continue-on-error': True,
@@ -61,9 +69,16 @@ def configure(workflow):
          'if': "steps.adopt-apk.outputs.manager_apk_reused == 'true'",
          'with': {'path': 'manager-artifact/${{ steps.adopt-apk.outputs.apk_filename }}',
                   'archive': False, 'if-no-files-found': 'error', 'overwrite': True}},
+        {'name': '整理已核验的 APK 以便下次按版本读取', 'if': INDEX_ADOPTED, 'continue-on-error': True,
+         'env': {'APK_FILENAME': expression('steps.adopt-apk.outputs.apk_filename')},
+         'run': 'set -euo pipefail\nrm -rf -- ' + CACHE_PATH + '\nmkdir -p ' + CACHE_PATH
+                + '\ncp -- "manager-artifact/$APK_FILENAME" ' + CACHE_PATH + '/\n'},
+        {'name': '保存已核验 APK 的版本缓存', 'uses': 'actions/cache/save@v5', 'if': INDEX_ADOPTED,
+         'continue-on-error': True, 'timeout-minutes': 2,
+         'with': {'path': CACHE_PATH, 'key': expression(PREPARE_KEY)}},
     ]
-    for output in ('apk_cache_key', 'manager_recipe_sha256'):
-        prepare['outputs'][output] = expression('steps.apk-cache-key.outputs.' + output)
+    prepare['outputs']['manager_recipe_sha256'] = expression('steps.apk-cache-key.outputs.manager_recipe_sha256')
+    prepare['outputs']['apk_cache_key'] = expression(f'{VERSION_KEY} || {LEGACY_KEY}')
     prepare['outputs']['manager_adoption'] = expression('steps.adopt-apk.outputs.manager_adoption')
     for field in APK_FIELDS:
         prepare['outputs']['reused_' + field] = expression('steps.adopt-apk.outputs.' + field)

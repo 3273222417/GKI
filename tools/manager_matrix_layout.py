@@ -37,12 +37,27 @@ def layout(kernel: dict, ddk: dict, selection: str, resolution: dict | None = No
     }
 
 
+def native_work(matrix: dict, routing: str, adopted: set[str]) -> dict:
+    if (not isinstance(matrix, dict) or set(matrix) != {'include'}
+            or not isinstance(rows := matrix['include'], list) or len(rows) > 256
+            or any(not isinstance(row, dict) or not isinstance(row.get(routing), str)
+                   or not row[routing] for row in rows)):
+        raise ValueError('Expected a complete routed native build matrix')
+    required = [row for row in rows if row[routing] not in adopted]
+    return {'native_count': str(len(required)), 'native_matrix': {'include': required or [{}]}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
-    result = layout(json.loads(os.environ['KERNEL_MATRIX'] or '{"include":[]}'),
-                    json.loads(os.environ['DDK_MATRIX']), os.environ['MANAGER_SELECTION'],
-                    json.loads(os.environ['MANAGER_RESOLUTION']) if os.environ.get('MANAGER_RESOLUTION') else None)
+    parser.add_argument('--native-only', choices=('variant', 'slot'))
+    args = parser.parse_args()
+    if args.native_only:
+        result = native_work(json.loads(os.environ['NATIVE_MATRIX']), args.native_only,
+                             set(os.environ['ADOPTED'].split()))
+    else:
+        result = layout(json.loads(os.environ['KERNEL_MATRIX'] or '{"include":[]}'),
+                        json.loads(os.environ['DDK_MATRIX']), os.environ['MANAGER_SELECTION'],
+                        json.loads(os.environ['MANAGER_RESOLUTION']) if os.environ.get('MANAGER_RESOLUTION') else None)
     with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
         for key, value in result.items():
             output.write(key + '=' + (value if isinstance(value, str) else json.dumps(value, separators=(',', ':'))) + '\n')

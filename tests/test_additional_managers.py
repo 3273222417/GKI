@@ -193,7 +193,7 @@ class CombinedWorkflowTests(unittest.TestCase):
             self.assertIsNone(worker)
             self.assertEqual({'workflow_dispatch'}, set(document['on']))
             kernel = 'build-oplus-kernel' if oplus else 'build-kernel'
-            self.assertEqual(7, len(document['jobs']))
+            self.assertEqual(8, len(document['jobs']))
             self.assertIn('select-managers', document['jobs'])
             self.assertNotIn('build-checksums', document['jobs'])
             self.assertFalse(any('combo-' in key for key in document['jobs']))

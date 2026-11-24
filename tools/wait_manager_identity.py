@@ -235,8 +235,10 @@ def read_identity_archive(archive: bytes, expected: Expected, *,
 
 class GitHubReader:
     """Use runner-provided gh credentials only for this repository's read APIs."""
-    def __init__(self, repository: str):
+    def __init__(self, repository: str, *, request_timeout: int = 60, attempts: int = READ_ATTEMPTS):
         self.repository = validate_repository(repository)
+        self.request_timeout = request_timeout
+        self.attempts = attempts
 
     @staticmethod
     def _stage(suffix: str) -> str:
@@ -275,11 +277,11 @@ class GitHubReader:
         environment = {key: value for key, value in os.environ.items()
                        if key not in ("SUKISU_APK_KEYSTORE", "SUKISU_APK_PASSWORD")}
         stage = self._stage(suffix)
-        for attempt in range(1, READ_ATTEMPTS + 1):
+        for attempt in range(1, self.attempts + 1):
             try:
                 response = subprocess.run(
                     ["gh", "api", "--hostname", "github.com", "--method", "GET", endpoint],
-                    capture_output=True, timeout=60, env=environment,
+                    capture_output=True, timeout=self.request_timeout, env=environment,
                 )
             except subprocess.TimeoutExpired:
                 reason, retry = 'request timeout', True
@@ -289,11 +291,11 @@ class GitHubReader:
                 if not response.returncode:
                     break
                 reason, retry = self._failure(response.stderr)
-            if not retry or attempt == READ_ATTEMPTS:
+            if not retry or attempt == self.attempts:
                 raise IdentityError(f'Manager identity {stage} failed: {reason} '
-                                    f'(attempt {attempt}/{READ_ATTEMPTS})') from None
+                                    f'(attempt {attempt}/{self.attempts})') from None
             print(f'::warning::Manager identity {stage}: {reason}; '
-                  f'retrying ({attempt + 1}/{READ_ATTEMPTS}).', file=sys.stderr)
+                  f'retrying ({attempt + 1}/{self.attempts}).', file=sys.stderr)
             time.sleep(attempt)
         if binary:
             if len(response.stdout) > MAX_ARCHIVE_BYTES:

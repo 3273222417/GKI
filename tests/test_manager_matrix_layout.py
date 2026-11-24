@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from manager_matrix_layout import expand, layout
+from manager_matrix_layout import expand, layout, native_work
 from manager_variants import MANAGERS, COMBINED_GROUPS
 from resolve_build_sources import REPOSITORIES, source_result
 import resolve_manager_selection as selected_sources
@@ -63,6 +63,17 @@ class ManagerMatrixLayoutTests(unittest.TestCase):
                 self.assertEqual({'include': [{}]}, result['kernel_overflow'])
                 self.assertEqual(8 * len(variants), len(result['ddk_build_matrix']['include']))
                 self.assertEqual(set(variants), {row['variant'] for row in result['ddk_build_matrix']['include']})
+
+    def test_adopted_apk_removes_all_its_native_rows_before_expansion(self):
+        for routing, adopted, missing in (('variant', 'SukiSU', 'BakaSU'),
+                                          ('slot', 'sukisu_latest', 'sukisu_paired_latest')):
+            with self.subTest(routing=routing):
+                rows = [{**item, routing: value} for value in (adopted, missing) for item in self.ddk['include']]
+                matrix = {'include': rows}
+                self.assertEqual({'native_count': '8', 'native_matrix': {'include': rows[8:]}},
+                                 native_work(matrix, routing, {adopted}))
+                self.assertEqual({'native_count': '0', 'native_matrix': {'include': [{}]}},
+                                 native_work(matrix, routing, {adopted, missing}))
 
     def test_missing_formal_releases_filter_both_kernel_and_native_module_rows(self):
         for selection, requested in COMBINED_GROUPS.items():

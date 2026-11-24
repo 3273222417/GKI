@@ -74,6 +74,29 @@ class CombinedReleaseWorkflowTests(unittest.TestCase):
             with self.subTest(job=job_id):
                 self.assertEqual(expected, workflow['jobs'][job_id]['env']['KSU_PACKAGE_NAME'])
 
+    def test_native_matrix_is_selected_after_direct_apk_adoption(self):
+        for oplus, workflow in self.workflows:
+            with self.subTest(oplus=oplus):
+                jobs = workflow['jobs']
+                route = jobs['select-native-builds']
+                self.assertIn('prepare-matrix', route['needs'])
+                layout = next(step for step in route['steps'] if step.get('id') == 'layout')
+                self.assertTrue(layout['run'].endswith('--native-only variant'))
+                for variant in MANAGERS:
+                    adopted = f"needs.prepare-matrix.outputs['{variant.lower()}_manager_adoption']"
+                    self.assertIn(f"{adopted} != '' && '{variant}'", layout['env']['ADOPTED'])
+                native = jobs['build-sukisu-lkm']
+                self.assertEqual('${{ fromJSON(needs.select-native-builds.outputs.native_matrix) }}',
+                                 native['strategy']['matrix'])
+                self.assertIn("needs.select-native-builds.outputs.native_count != '0'", native['if'])
+                upload = next(step for step in jobs['prepare-matrix']['steps']
+                              if step['name'] == '上传原始配套 APK')
+                self.assertIn("steps.adopt-apk.outputs.manager_apk_reused == 'true'", upload['if'])
+                restore = next(step for step in jobs['prepare-matrix']['steps'] if step.get('id') == 'apk-cache')
+                version, legacy = restore['with']['restore-keys'].splitlines()
+                self.assertIn('apk_version_cache_key', version)
+                self.assertIn('apk_cache_key', legacy)
+
     def test_combined_gki_archives_and_boot_images_follow_the_actual_manager_package(self):
         shell = shutil.which('bash') or shutil.which('sh')
         if not shell and (git := shutil.which('git')):

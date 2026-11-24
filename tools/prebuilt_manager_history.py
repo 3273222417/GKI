@@ -1,4 +1,4 @@
-"""Read verified artifacts from trusted successful manager prebuild runs."""
+"""Read verified artifacts from trusted successful manager-producing runs."""
 from __future__ import annotations
 
 import hashlib
@@ -16,23 +16,31 @@ EVENTS = ('push', 'schedule', 'workflow_run', 'workflow_dispatch')
 SHA1 = re.compile(r'[0-9a-f]{40}\Z')
 DIGEST = re.compile(r'sha256:[0-9a-f]{64}\Z')
 PAGE_SIZE = 25
+APK_BUILD_WORKFLOWS = ('kernel-full-feature-matrix.yml', 'oplus-full-feature-matrix.yml')
+APK_PREBUILD_RUNS = 4
+APK_BUILD_RUN_PAGE_SIZE = 1
+APK_BUILD_RUN_PAGES = 1
+APK_ARTIFACT_PAGE_SIZE = 100
+# A full batch can contain 512 targets with four kernel outputs each, plus
+# manager APKs and checksums. Do not stop before an older APK in that listing.
+APK_ARTIFACT_PAGES = 24
 
 
 def _id(value):
     return type(value) is int and 0 < value < 2**63
 
 
-def _workflow_id(reader):
-    workflow = reader.get(WORKFLOW_API)
-    if (not isinstance(workflow, dict) or workflow.get('path') != WORKFLOW_PATH
+def _workflow_id(reader, filename=WORKFLOW_FILE):
+    workflow = reader.get('actions/workflows/' + filename)
+    if (not isinstance(workflow, dict) or workflow.get('path') != '.github/workflows/' + filename
             or not _id(workflow.get('id'))):
-        raise IdentityError('Could not confirm the standalone manager APK workflow')
+        raise IdentityError('Could not confirm the manager APK producer workflow')
     return workflow['id']
 
 
-def _matching_run(run, repository, branch, workflow_id, current_run):
+def _matching_run(run, repository, branch, workflow_id, current_run, *, workflow_path=WORKFLOW_PATH):
     if (not isinstance(run, dict) or not _id(run.get('id')) or run['id'] == current_run
-            or run.get('workflow_id') != workflow_id or run.get('path') != WORKFLOW_PATH
+            or run.get('workflow_id') != workflow_id or run.get('path') != workflow_path
             or run.get('head_branch') != branch or run.get('event') not in EVENTS
             or run.get('status') != 'completed' or run.get('conclusion') != 'success'
             or not _id(run.get('run_attempt')) or not isinstance(run.get('head_sha'), str)
@@ -44,14 +52,14 @@ def _matching_run(run, repository, branch, workflow_id, current_run):
             and identities[0]['id'] == identities[1]['id'])
 
 
-def _list(reader, path, key, query, *, max_pages):
+def _list(reader, path, key, query, *, max_pages, page_size=PAGE_SIZE):
     for page in range(1, max_pages + 1):
-        suffix = path + '?' + urlencode({**query, 'per_page': PAGE_SIZE, 'page': page})
+        suffix = path + '?' + urlencode({**query, 'per_page': page_size, 'page': page})
         document = reader.get(suffix)
-        if not isinstance(document, dict) or not isinstance(rows := document.get(key), list) or len(rows) > PAGE_SIZE:
+        if not isinstance(document, dict) or not isinstance(rows := document.get(key), list) or len(rows) > page_size:
             raise IdentityError('Invalid manager prebuild workflow or artifact listing')
         yield from rows
-        if len(rows) < PAGE_SIZE:
+        if len(rows) < page_size:
             break
 
 
@@ -63,6 +71,33 @@ def successful_runs(reader: GitHubReader, repository: str, branch: str, *, curre
     for run in rows:
         if _matching_run(run, repository, branch, workflow_id, current_run):
             yield run
+
+
+def manager_apk_runs(reader: GitHubReader, repository: str, branch: str, *, current_run: int | None = None):
+    """Prefer standalone APKs, then recent successful GKI and OPlus builds.
+
+    ``branch`` is the repository default branch supplied by the workflow. Keep
+    ordinary build lookups bounded per exact producer workflow; state recovery
+    deliberately continues to use only the standalone workflow helpers.
+    """
+    repository, branch = validate_repository(repository), validate_ref(branch)
+    seen = set()
+    for run in successful_runs(reader, repository, branch, current_run=current_run):
+        seen.add(run['id'])
+        yield run
+        if len(seen) >= APK_PREBUILD_RUNS:
+            break
+    for filename in APK_BUILD_WORKFLOWS:
+        workflow_id = _workflow_id(reader, filename)
+        workflow_path = '.github/workflows/' + filename
+        rows = _list(reader, 'actions/workflows/' + filename + '/runs', 'workflow_runs',
+                     {'branch': branch, 'status': 'success'}, max_pages=APK_BUILD_RUN_PAGES,
+                     page_size=APK_BUILD_RUN_PAGE_SIZE)
+        for run in rows:
+            if (_matching_run(run, repository, branch, workflow_id, current_run, workflow_path=workflow_path)
+                    and run['id'] not in seen):
+                seen.add(run['id'])
+                yield run
 
 
 def _matching_artifact(artifact, run):
@@ -78,9 +113,10 @@ def _matching_artifact(artifact, run):
             and origin.get('head_repository_id') == run['head_repository']['id'])
 
 
-def run_artifacts(reader: GitHubReader, run: dict):
+def run_artifacts(reader: GitHubReader, run: dict, *, max_pages=2, page_size=PAGE_SIZE):
     """List nonexpired artifacts tied to the already verified workflow run."""
-    for artifact in _list(reader, f"actions/runs/{run['id']}/artifacts", 'artifacts', {}, max_pages=2):
+    for artifact in _list(reader, f"actions/runs/{run['id']}/artifacts", 'artifacts', {},
+                          max_pages=max_pages, page_size=page_size):
         if _matching_artifact(artifact, run):
             yield artifact
 

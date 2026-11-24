@@ -88,7 +88,7 @@ def require_selection(job):
 
 
 def add_combined(workflow, *, oplus):
-    from manager_apk_worker import use_native_cache
+    from manager_apk_worker import NATIVE_LAYOUT, route_native_jobs, use_native_cache
 
     root = copy.deepcopy(workflow)
     kernel_id = 'build-oplus-kernel' if oplus else 'build-kernel'
@@ -135,6 +135,10 @@ def add_combined(workflow, *, oplus):
     manager['if'] = ready + ' && ' + SELECTION_READY + " && (needs.build-sukisu-lkm.result == 'success' || needs.build-sukisu-lkm.result == 'skipped')"
     manager['strategy'] = {'fail-fast': False, 'matrix': copy.deepcopy(VARIANTS)}
     manager['outputs'] = outputs_by_manager(scoped(original_manager['outputs']))
+    jobs[NATIVE_LAYOUT] = route_native_jobs(
+        lkm, manager, candidate_matrix='needs.prepare-matrix.outputs.ddk_build_matrix', routing='variant',
+        adoption={variant: f"needs.prepare-matrix.outputs['{variant.lower()}_manager_adoption']"
+                  for variant in MANAGERS})
 
     kernel = jobs[kernel_id]
     kernel_gate = ready + " && needs.build-sukisu-manager.result == 'success'"

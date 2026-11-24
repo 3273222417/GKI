@@ -220,8 +220,9 @@ jobs:
       SukiSU_ksu_short: ${{ matrix.variant == 'SukiSU' && (steps.sources.outputs.ksu_short) || '' }}
       SukiSU_ksu_source_branch: ${{ matrix.variant == 'SukiSU' && (steps.sources.outputs.ksu_source_branch) || '' }}
       SukiSU_effective_ksu_branch: ${{ matrix.variant == 'SukiSU' && (steps.sources.outputs.effective_ksu_branch) || '' }}
-      SukiSU_apk_cache_key: ${{ matrix.variant == 'SukiSU' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       SukiSU_manager_recipe_sha256: ${{ matrix.variant == 'SukiSU' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      SukiSU_apk_cache_key: ${{ matrix.variant == 'SukiSU' && (steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key)
         || '' }}
       SukiSU_manager_adoption: ${{ matrix.variant == 'SukiSU' && (steps.adopt-apk.outputs.manager_adoption) || '' }}
       SukiSU_reused_manager_package: ${{ matrix.variant == 'SukiSU' && (steps.adopt-apk.outputs.manager_package) || '' }}
@@ -253,8 +254,9 @@ jobs:
       BakaSU_ksu_short: ${{ matrix.variant == 'BakaSU' && (steps.sources.outputs.ksu_short) || '' }}
       BakaSU_ksu_source_branch: ${{ matrix.variant == 'BakaSU' && (steps.sources.outputs.ksu_source_branch) || '' }}
       BakaSU_effective_ksu_branch: ${{ matrix.variant == 'BakaSU' && (steps.sources.outputs.effective_ksu_branch) || '' }}
-      BakaSU_apk_cache_key: ${{ matrix.variant == 'BakaSU' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       BakaSU_manager_recipe_sha256: ${{ matrix.variant == 'BakaSU' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      BakaSU_apk_cache_key: ${{ matrix.variant == 'BakaSU' && (steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key)
         || '' }}
       BakaSU_manager_adoption: ${{ matrix.variant == 'BakaSU' && (steps.adopt-apk.outputs.manager_adoption) || '' }}
       BakaSU_reused_manager_package: ${{ matrix.variant == 'BakaSU' && (steps.adopt-apk.outputs.manager_package) || '' }}
@@ -293,10 +295,10 @@ jobs:
         || '' }}
       KernelSU-Next_effective_ksu_branch: ${{ matrix.variant == 'KernelSU-Next' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      KernelSU-Next_apk_cache_key: ${{ matrix.variant == 'KernelSU-Next' && (steps.apk-cache-key.outputs.apk_cache_key) ||
-        '' }}
       KernelSU-Next_manager_recipe_sha256: ${{ matrix.variant == 'KernelSU-Next' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      KernelSU-Next_apk_cache_key: ${{ matrix.variant == 'KernelSU-Next' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       KernelSU-Next_manager_adoption: ${{ matrix.variant == 'KernelSU-Next' && (steps.adopt-apk.outputs.manager_adoption)
         || '' }}
       KernelSU-Next_reused_manager_package: ${{ matrix.variant == 'KernelSU-Next' && (steps.adopt-apk.outputs.manager_package)
@@ -334,8 +336,9 @@ jobs:
       KernelSU_ksu_source_branch: ${{ matrix.variant == 'KernelSU' && (steps.sources.outputs.ksu_source_branch) || '' }}
       KernelSU_effective_ksu_branch: ${{ matrix.variant == 'KernelSU' && (steps.sources.outputs.effective_ksu_branch) || ''
         }}
-      KernelSU_apk_cache_key: ${{ matrix.variant == 'KernelSU' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       KernelSU_manager_recipe_sha256: ${{ matrix.variant == 'KernelSU' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      KernelSU_apk_cache_key: ${{ matrix.variant == 'KernelSU' && (steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key)
         || '' }}
       KernelSU_manager_adoption: ${{ matrix.variant == 'KernelSU' && (steps.adopt-apk.outputs.manager_adoption) || '' }}
       KernelSU_reused_manager_package: ${{ matrix.variant == 'KernelSU' && (steps.adopt-apk.outputs.manager_package) || ''
@@ -368,9 +371,10 @@ jobs:
       KowSU_ksu_short: ${{ matrix.variant == 'KowSU' && (steps.sources.outputs.ksu_short) || '' }}
       KowSU_ksu_source_branch: ${{ matrix.variant == 'KowSU' && (steps.sources.outputs.ksu_source_branch) || '' }}
       KowSU_effective_ksu_branch: ${{ matrix.variant == 'KowSU' && (steps.sources.outputs.effective_ksu_branch) || '' }}
-      KowSU_apk_cache_key: ${{ matrix.variant == 'KowSU' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       KowSU_manager_recipe_sha256: ${{ matrix.variant == 'KowSU' && (steps.apk-cache-key.outputs.manager_recipe_sha256) ||
         '' }}
+      KowSU_apk_cache_key: ${{ matrix.variant == 'KowSU' && (steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key)
+        || '' }}
       KowSU_manager_adoption: ${{ matrix.variant == 'KowSU' && (steps.adopt-apk.outputs.manager_adoption) || '' }}
       KowSU_reused_manager_package: ${{ matrix.variant == 'KowSU' && (steps.adopt-apk.outputs.manager_package) || '' }}
       KowSU_reused_manager_cert_size: ${{ matrix.variant == 'KowSU' && (steps.adopt-apk.outputs.manager_cert_size) || '' }}
@@ -400,8 +404,9 @@ jobs:
       FinaSU_ksu_short: ${{ matrix.variant == 'FinaSU' && (steps.sources.outputs.ksu_short) || '' }}
       FinaSU_ksu_source_branch: ${{ matrix.variant == 'FinaSU' && (steps.sources.outputs.ksu_source_branch) || '' }}
       FinaSU_effective_ksu_branch: ${{ matrix.variant == 'FinaSU' && (steps.sources.outputs.effective_ksu_branch) || '' }}
-      FinaSU_apk_cache_key: ${{ matrix.variant == 'FinaSU' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       FinaSU_manager_recipe_sha256: ${{ matrix.variant == 'FinaSU' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      FinaSU_apk_cache_key: ${{ matrix.variant == 'FinaSU' && (steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key)
         || '' }}
       FinaSU_manager_adoption: ${{ matrix.variant == 'FinaSU' && (steps.adopt-apk.outputs.manager_adoption) || '' }}
       FinaSU_reused_manager_package: ${{ matrix.variant == 'FinaSU' && (steps.adopt-apk.outputs.manager_package) || '' }}
@@ -596,7 +601,7 @@ jobs:
             output.write('source_identity='+json.dumps(identity,separators=(',',':'))+'\n')
             output.write('native_source_version='+native_version+'\n')
         PY
-    - name: 确定配套 APK 的复用条件
+    - name: 按管理器版本定位已编译 APK
       id: apk-cache-key
       if: ((matrix.variant == 'SukiSU' || matrix.variant == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant
         == 'KernelSU' || matrix.variant == 'KowSU' || matrix.variant == 'FinaSU')) && (steps.sources.outputs.effective_ksu_branch
@@ -609,10 +614,14 @@ jobs:
         MANAGER_CERT_SHA256: ${{ steps.certificate.outputs.cert_sha256 }}
         MANAGER_SOURCE_IDENTITY: ${{ steps.source-identity.outputs.source_identity }}
       run: |-
+        set -euo pipefail
         python3 tools/reusable_manager_apk.py key --variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \
           --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \
           --source-identity "$MANAGER_SOURCE_IDENTITY"
-    - name: 读取相同源码和签名的已编译 APK
+        python3 tools/restore_prebuilt_manager_apk.py --write-version-key --variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \
+          --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \
+          --source-identity "$MANAGER_SOURCE_IDENTITY" --source-dir ksu-snapshot-source
+    - name: 直接读取匹配版本的已编译 APK
       id: apk-cache
       uses: actions/cache/restore@v5
       if: steps.apk-cache-key.outputs.apk_cache_key != ''
@@ -620,8 +629,11 @@ jobs:
       continue-on-error: true
       with:
         path: manager-apk-cache
-        key: ${{ format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_cache_key, github.run_id, github.run_attempt) }}
-        restore-keys: ${{ format('{0}-', steps.apk-cache-key.outputs.apk_cache_key) }}
+        key: ${{ format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key,
+          github.run_id, github.run_attempt) }}
+        restore-keys: |-
+          ${{ steps.apk-cache-key.outputs.apk_version_cache_key != '' && format('{0}-', steps.apk-cache-key.outputs.apk_version_cache_key) || '' }}
+          ${{ format('{0}-', steps.apk-cache-key.outputs.apk_cache_key) }}
     - name: 核验已编译 APK 并保留原始编译记录
       id: adopt-apk
       if: steps.apk-cache-key.outputs.apk_cache_key != ''
@@ -649,6 +661,27 @@ jobs:
         archive: false
         if-no-files-found: error
         overwrite: true
+    - name: 整理已核验的 APK 以便下次按版本读取
+      if: steps.adopt-apk.outputs.manager_apk_reused == 'true' && steps.apk-cache-key.outputs.apk_version_cache_key != ''
+        && !startsWith(steps.apk-cache.outputs.cache-matched-key, format('{0}-', steps.apk-cache-key.outputs.apk_version_cache_key))
+      continue-on-error: true
+      env:
+        APK_FILENAME: ${{ steps.adopt-apk.outputs.apk_filename }}
+      run: |
+        set -euo pipefail
+        rm -rf -- manager-apk-cache
+        mkdir -p manager-apk-cache
+        cp -- "manager-artifact/$APK_FILENAME" manager-apk-cache/
+    - name: 保存已核验 APK 的版本缓存
+      uses: actions/cache/save@v5
+      if: steps.adopt-apk.outputs.manager_apk_reused == 'true' && steps.apk-cache-key.outputs.apk_version_cache_key != ''
+        && !startsWith(steps.apk-cache.outputs.cache-matched-key, format('{0}-', steps.apk-cache-key.outputs.apk_version_cache_key))
+      continue-on-error: true
+      timeout-minutes: 2
+      with:
+        path: manager-apk-cache
+        key: ${{ format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key,
+          github.run_id, github.run_attempt) }}
     - name: 保存本次不可变源码缓存
       uses: actions/cache/save@v5
       timeout-minutes: 3
@@ -697,6 +730,7 @@ jobs:
     needs:
     - select-managers
     - prepare-matrix
+    - select-native-builds
     if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.select-managers.result == 'success'
       && needs.select-managers.outputs.active_count != '0' && ((contains(fromJSON(needs.select-managers.outputs.active_managers),
       'SukiSU') && needs.prepare-matrix.outputs['sukisu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
@@ -704,7 +738,8 @@ jobs:
       'KernelSU-Next') && needs.prepare-matrix.outputs['kernelsu-next_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
       'KernelSU') && needs.prepare-matrix.outputs['kernelsu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
       'KowSU') && needs.prepare-matrix.outputs['kowsu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
-      'FinaSU') && needs.prepare-matrix.outputs['finasu_manager_adoption'] == ''))
+      'FinaSU') && needs.prepare-matrix.outputs['finasu_manager_adoption'] == '')) && needs.select-native-builds.result ==
+      'success' && needs.select-native-builds.outputs.native_count != '0'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -726,7 +761,7 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 8
-      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.ddk_build_matrix) }}
+      matrix: ${{ fromJSON(needs.select-native-builds.outputs.native_matrix) }}
     steps:
     - name: 检出构建工具
       uses: actions/checkout@v6
@@ -921,7 +956,7 @@ jobs:
     name: 编译配套 ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 管理器 APK
     if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.select-managers.result == 'success'
       && needs.select-managers.outputs.active_count != '0' && (needs.build-sukisu-lkm.result == 'success' || needs.build-sukisu-lkm.result
-      == 'skipped')
+      == 'skipped') && (needs.select-native-builds.result == 'success' || needs.select-native-builds.result == 'skipped')
     env:
       KSU_VARIANT: ${{ matrix.variant }}
       GKI_COMBINED_WORKER: ${{ (inputs.kernelsu_variant == 'SukiSU + BakaSU + KernelSU-Next' || inputs.kernelsu_variant ==
@@ -931,6 +966,7 @@ jobs:
     - prepare-matrix
     - build-sukisu-lkm
     - select-managers
+    - select-native-builds
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -7470,6 +7506,40 @@ jobs:
         else
           echo '构建产物核验未完成，请查看对应日志。' >> "$GITHUB_STEP_SUMMARY"
         fi
+  select-native-builds:
+    name: 安排未命中的 APK 构建
+    needs:
+    - select-managers
+    - prepare-matrix
+    if: always() && !cancelled() && needs.prepare-matrix.result == 'success' && needs.select-managers.result == 'success'
+      && needs.select-managers.outputs.active_count != '0' && ((contains(fromJSON(needs.select-managers.outputs.active_managers),
+      'SukiSU') && needs.prepare-matrix.outputs['sukisu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
+      'BakaSU') && needs.prepare-matrix.outputs['bakasu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
+      'KernelSU-Next') && needs.prepare-matrix.outputs['kernelsu-next_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
+      'KernelSU') && needs.prepare-matrix.outputs['kernelsu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
+      'KowSU') && needs.prepare-matrix.outputs['kowsu_manager_adoption'] == '') || (contains(fromJSON(needs.select-managers.outputs.active_managers),
+      'FinaSU') && needs.prepare-matrix.outputs['finasu_manager_adoption'] == ''))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      native_matrix: ${{ steps.layout.outputs.native_matrix }}
+      native_count: ${{ steps.layout.outputs.native_count }}
+    steps:
+    - name: 检出构建工具
+      uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - name: 只展开缺少配套 APK 的原生目标
+      id: layout
+      env:
+        NATIVE_MATRIX: ${{ needs.prepare-matrix.outputs.ddk_build_matrix }}
+        ADOPTED: ${{ needs.prepare-matrix.outputs['sukisu_manager_adoption'] != '' && 'SukiSU' || '' }} ${{ needs.prepare-matrix.outputs['bakasu_manager_adoption']
+          != '' && 'BakaSU' || '' }} ${{ needs.prepare-matrix.outputs['kernelsu-next_manager_adoption'] != '' && 'KernelSU-Next'
+          || '' }} ${{ needs.prepare-matrix.outputs['kernelsu_manager_adoption'] != '' && 'KernelSU' || '' }} ${{ needs.prepare-matrix.outputs['kowsu_manager_adoption']
+          != '' && 'KowSU' || '' }} ${{ needs.prepare-matrix.outputs['finasu_manager_adoption'] != '' && 'FinaSU' || '' }}
+      run: python3 tools/manager_matrix_layout.py --native-only variant
   build-kernel-overflow:
     name: 扩展内核批次（仅联合全量超过 256 个目标时执行）
     runs-on: ${{ vars.KERNEL_SELF_HOSTED == 'false' && 'ubuntu-24.04' || (startsWith(vars.KERNEL_RUNNER, '[') && fromJSON(vars.KERNEL_RUNNER)

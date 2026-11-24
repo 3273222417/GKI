@@ -124,10 +124,10 @@ jobs:
         '' }}
       sukisu_stable_effective_ksu_branch: ${{ matrix.slot == 'sukisu_stable' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      sukisu_stable_apk_cache_key: ${{ matrix.slot == 'sukisu_stable' && (steps.apk-cache-key.outputs.apk_cache_key) || ''
-        }}
       sukisu_stable_manager_recipe_sha256: ${{ matrix.slot == 'sukisu_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      sukisu_stable_apk_cache_key: ${{ matrix.slot == 'sukisu_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       sukisu_stable_manager_adoption: ${{ matrix.slot == 'sukisu_stable' && (steps.adopt-apk.outputs.manager_adoption) ||
         '' }}
       sukisu_stable_reused_manager_package: ${{ matrix.slot == 'sukisu_stable' && (steps.adopt-apk.outputs.manager_package)
@@ -161,10 +161,10 @@ jobs:
         '' }}
       sukisu_latest_effective_ksu_branch: ${{ matrix.slot == 'sukisu_latest' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      sukisu_latest_apk_cache_key: ${{ matrix.slot == 'sukisu_latest' && (steps.apk-cache-key.outputs.apk_cache_key) || ''
-        }}
       sukisu_latest_manager_recipe_sha256: ${{ matrix.slot == 'sukisu_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      sukisu_latest_apk_cache_key: ${{ matrix.slot == 'sukisu_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       sukisu_latest_manager_adoption: ${{ matrix.slot == 'sukisu_latest' && (steps.adopt-apk.outputs.manager_adoption) ||
         '' }}
       sukisu_latest_reused_manager_package: ${{ matrix.slot == 'sukisu_latest' && (steps.adopt-apk.outputs.manager_package)
@@ -180,6 +180,90 @@ jobs:
         || '' }}
       sukisu_latest_reused_apk_filename: ${{ matrix.slot == 'sukisu_latest' && (steps.adopt-apk.outputs.apk_filename) || ''
         }}
+      sukisu_paired_stable_source_cache_key: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      sukisu_paired_stable_source_identity: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      sukisu_paired_stable_native_source_version: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      sukisu_paired_stable_ddk_matrix: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      sukisu_paired_stable_manager_package: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.certificate.outputs.package)
+        || '' }}
+      sukisu_paired_stable_manager_cert_size: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      sukisu_paired_stable_manager_cert_sha256: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      sukisu_paired_stable_ksu_ref: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.sources.outputs.ksu_ref) || '' }}
+      sukisu_paired_stable_ksu_repo: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.sources.outputs.ksu_repo) || '' }}
+      sukisu_paired_stable_ksu_short: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.sources.outputs.ksu_short) || ''
+        }}
+      sukisu_paired_stable_ksu_source_branch: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      sukisu_paired_stable_effective_ksu_branch: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      sukisu_paired_stable_manager_recipe_sha256: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      sukisu_paired_stable_apk_cache_key: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      sukisu_paired_stable_manager_adoption: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      sukisu_paired_stable_reused_manager_package: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      sukisu_paired_stable_reused_manager_cert_size: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      sukisu_paired_stable_reused_manager_cert_sha256: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      sukisu_paired_stable_reused_apk_sha256: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      sukisu_paired_stable_reused_manager_version_name: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      sukisu_paired_stable_reused_manager_version_code: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      sukisu_paired_stable_reused_apk_filename: ${{ matrix.slot == 'sukisu_paired_stable' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      sukisu_paired_latest_source_cache_key: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      sukisu_paired_latest_source_identity: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      sukisu_paired_latest_native_source_version: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      sukisu_paired_latest_ddk_matrix: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      sukisu_paired_latest_manager_package: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.certificate.outputs.package)
+        || '' }}
+      sukisu_paired_latest_manager_cert_size: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      sukisu_paired_latest_manager_cert_sha256: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      sukisu_paired_latest_ksu_ref: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.sources.outputs.ksu_ref) || '' }}
+      sukisu_paired_latest_ksu_repo: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.sources.outputs.ksu_repo) || '' }}
+      sukisu_paired_latest_ksu_short: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.sources.outputs.ksu_short) || ''
+        }}
+      sukisu_paired_latest_ksu_source_branch: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      sukisu_paired_latest_effective_ksu_branch: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      sukisu_paired_latest_manager_recipe_sha256: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      sukisu_paired_latest_apk_cache_key: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      sukisu_paired_latest_manager_adoption: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      sukisu_paired_latest_reused_manager_package: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      sukisu_paired_latest_reused_manager_cert_size: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      sukisu_paired_latest_reused_manager_cert_sha256: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      sukisu_paired_latest_reused_apk_sha256: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      sukisu_paired_latest_reused_manager_version_name: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      sukisu_paired_latest_reused_manager_version_code: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      sukisu_paired_latest_reused_apk_filename: ${{ matrix.slot == 'sukisu_paired_latest' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
       bakasu_stable_source_cache_key: ${{ matrix.slot == 'bakasu_stable' && (steps.source-snapshot.outputs.source_cache_key)
         || '' }}
       bakasu_stable_source_identity: ${{ matrix.slot == 'bakasu_stable' && (steps.source-identity.outputs.source_identity)
@@ -198,10 +282,10 @@ jobs:
         '' }}
       bakasu_stable_effective_ksu_branch: ${{ matrix.slot == 'bakasu_stable' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      bakasu_stable_apk_cache_key: ${{ matrix.slot == 'bakasu_stable' && (steps.apk-cache-key.outputs.apk_cache_key) || ''
-        }}
       bakasu_stable_manager_recipe_sha256: ${{ matrix.slot == 'bakasu_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      bakasu_stable_apk_cache_key: ${{ matrix.slot == 'bakasu_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       bakasu_stable_manager_adoption: ${{ matrix.slot == 'bakasu_stable' && (steps.adopt-apk.outputs.manager_adoption) ||
         '' }}
       bakasu_stable_reused_manager_package: ${{ matrix.slot == 'bakasu_stable' && (steps.adopt-apk.outputs.manager_package)
@@ -235,10 +319,10 @@ jobs:
         '' }}
       bakasu_latest_effective_ksu_branch: ${{ matrix.slot == 'bakasu_latest' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      bakasu_latest_apk_cache_key: ${{ matrix.slot == 'bakasu_latest' && (steps.apk-cache-key.outputs.apk_cache_key) || ''
-        }}
       bakasu_latest_manager_recipe_sha256: ${{ matrix.slot == 'bakasu_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      bakasu_latest_apk_cache_key: ${{ matrix.slot == 'bakasu_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       bakasu_latest_manager_adoption: ${{ matrix.slot == 'bakasu_latest' && (steps.adopt-apk.outputs.manager_adoption) ||
         '' }}
       bakasu_latest_reused_manager_package: ${{ matrix.slot == 'bakasu_latest' && (steps.adopt-apk.outputs.manager_package)
@@ -254,6 +338,90 @@ jobs:
         || '' }}
       bakasu_latest_reused_apk_filename: ${{ matrix.slot == 'bakasu_latest' && (steps.adopt-apk.outputs.apk_filename) || ''
         }}
+      bakasu_paired_stable_source_cache_key: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      bakasu_paired_stable_source_identity: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      bakasu_paired_stable_native_source_version: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      bakasu_paired_stable_ddk_matrix: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      bakasu_paired_stable_manager_package: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.certificate.outputs.package)
+        || '' }}
+      bakasu_paired_stable_manager_cert_size: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      bakasu_paired_stable_manager_cert_sha256: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      bakasu_paired_stable_ksu_ref: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.sources.outputs.ksu_ref) || '' }}
+      bakasu_paired_stable_ksu_repo: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.sources.outputs.ksu_repo) || '' }}
+      bakasu_paired_stable_ksu_short: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.sources.outputs.ksu_short) || ''
+        }}
+      bakasu_paired_stable_ksu_source_branch: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      bakasu_paired_stable_effective_ksu_branch: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      bakasu_paired_stable_manager_recipe_sha256: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      bakasu_paired_stable_apk_cache_key: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      bakasu_paired_stable_manager_adoption: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      bakasu_paired_stable_reused_manager_package: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      bakasu_paired_stable_reused_manager_cert_size: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      bakasu_paired_stable_reused_manager_cert_sha256: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      bakasu_paired_stable_reused_apk_sha256: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      bakasu_paired_stable_reused_manager_version_name: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      bakasu_paired_stable_reused_manager_version_code: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      bakasu_paired_stable_reused_apk_filename: ${{ matrix.slot == 'bakasu_paired_stable' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      bakasu_paired_latest_source_cache_key: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      bakasu_paired_latest_source_identity: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      bakasu_paired_latest_native_source_version: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      bakasu_paired_latest_ddk_matrix: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      bakasu_paired_latest_manager_package: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.certificate.outputs.package)
+        || '' }}
+      bakasu_paired_latest_manager_cert_size: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      bakasu_paired_latest_manager_cert_sha256: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      bakasu_paired_latest_ksu_ref: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.sources.outputs.ksu_ref) || '' }}
+      bakasu_paired_latest_ksu_repo: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.sources.outputs.ksu_repo) || '' }}
+      bakasu_paired_latest_ksu_short: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.sources.outputs.ksu_short) || ''
+        }}
+      bakasu_paired_latest_ksu_source_branch: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      bakasu_paired_latest_effective_ksu_branch: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      bakasu_paired_latest_manager_recipe_sha256: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      bakasu_paired_latest_apk_cache_key: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      bakasu_paired_latest_manager_adoption: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      bakasu_paired_latest_reused_manager_package: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      bakasu_paired_latest_reused_manager_cert_size: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      bakasu_paired_latest_reused_manager_cert_sha256: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      bakasu_paired_latest_reused_apk_sha256: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      bakasu_paired_latest_reused_manager_version_name: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      bakasu_paired_latest_reused_manager_version_code: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      bakasu_paired_latest_reused_apk_filename: ${{ matrix.slot == 'bakasu_paired_latest' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
       kernelsu-next_stable_source_cache_key: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.source-snapshot.outputs.source_cache_key)
         || '' }}
       kernelsu-next_stable_source_identity: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.source-identity.outputs.source_identity)
@@ -276,10 +444,10 @@ jobs:
         || '' }}
       kernelsu-next_stable_effective_ksu_branch: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      kernelsu-next_stable_apk_cache_key: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.apk-cache-key.outputs.apk_cache_key)
-        || '' }}
       kernelsu-next_stable_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      kernelsu-next_stable_apk_cache_key: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kernelsu-next_stable_manager_adoption: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.adopt-apk.outputs.manager_adoption)
         || '' }}
       kernelsu-next_stable_reused_manager_package: ${{ matrix.slot == 'kernelsu-next_stable' && (steps.adopt-apk.outputs.manager_package)
@@ -318,10 +486,10 @@ jobs:
         || '' }}
       kernelsu-next_latest_effective_ksu_branch: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      kernelsu-next_latest_apk_cache_key: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.apk-cache-key.outputs.apk_cache_key)
-        || '' }}
       kernelsu-next_latest_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      kernelsu-next_latest_apk_cache_key: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kernelsu-next_latest_manager_adoption: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.adopt-apk.outputs.manager_adoption)
         || '' }}
       kernelsu-next_latest_reused_manager_package: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.adopt-apk.outputs.manager_package)
@@ -337,6 +505,94 @@ jobs:
       kernelsu-next_latest_reused_manager_version_code: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.adopt-apk.outputs.manager_version_code)
         || '' }}
       kernelsu-next_latest_reused_apk_filename: ${{ matrix.slot == 'kernelsu-next_latest' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      kernelsu-next_paired_stable_source_cache_key: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      kernelsu-next_paired_stable_source_identity: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      kernelsu-next_paired_stable_native_source_version: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      kernelsu-next_paired_stable_ddk_matrix: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.lkm-matrix.outputs.matrix)
+        || '' }}
+      kernelsu-next_paired_stable_manager_package: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.certificate.outputs.package)
+        || '' }}
+      kernelsu-next_paired_stable_manager_cert_size: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      kernelsu-next_paired_stable_manager_cert_sha256: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      kernelsu-next_paired_stable_ksu_ref: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.sources.outputs.ksu_ref)
+        || '' }}
+      kernelsu-next_paired_stable_ksu_repo: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.sources.outputs.ksu_repo)
+        || '' }}
+      kernelsu-next_paired_stable_ksu_short: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.sources.outputs.ksu_short)
+        || '' }}
+      kernelsu-next_paired_stable_ksu_source_branch: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      kernelsu-next_paired_stable_effective_ksu_branch: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      kernelsu-next_paired_stable_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      kernelsu-next_paired_stable_apk_cache_key: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      kernelsu-next_paired_stable_manager_adoption: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      kernelsu-next_paired_stable_reused_manager_package: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      kernelsu-next_paired_stable_reused_manager_cert_size: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      kernelsu-next_paired_stable_reused_manager_cert_sha256: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      kernelsu-next_paired_stable_reused_apk_sha256: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      kernelsu-next_paired_stable_reused_manager_version_name: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      kernelsu-next_paired_stable_reused_manager_version_code: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      kernelsu-next_paired_stable_reused_apk_filename: ${{ matrix.slot == 'kernelsu-next_paired_stable' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      kernelsu-next_paired_latest_source_cache_key: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      kernelsu-next_paired_latest_source_identity: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      kernelsu-next_paired_latest_native_source_version: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      kernelsu-next_paired_latest_ddk_matrix: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.lkm-matrix.outputs.matrix)
+        || '' }}
+      kernelsu-next_paired_latest_manager_package: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.certificate.outputs.package)
+        || '' }}
+      kernelsu-next_paired_latest_manager_cert_size: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      kernelsu-next_paired_latest_manager_cert_sha256: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      kernelsu-next_paired_latest_ksu_ref: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.sources.outputs.ksu_ref)
+        || '' }}
+      kernelsu-next_paired_latest_ksu_repo: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.sources.outputs.ksu_repo)
+        || '' }}
+      kernelsu-next_paired_latest_ksu_short: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.sources.outputs.ksu_short)
+        || '' }}
+      kernelsu-next_paired_latest_ksu_source_branch: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      kernelsu-next_paired_latest_effective_ksu_branch: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      kernelsu-next_paired_latest_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      kernelsu-next_paired_latest_apk_cache_key: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      kernelsu-next_paired_latest_manager_adoption: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      kernelsu-next_paired_latest_reused_manager_package: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      kernelsu-next_paired_latest_reused_manager_cert_size: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      kernelsu-next_paired_latest_reused_manager_cert_sha256: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      kernelsu-next_paired_latest_reused_apk_sha256: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      kernelsu-next_paired_latest_reused_manager_version_name: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      kernelsu-next_paired_latest_reused_manager_version_code: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      kernelsu-next_paired_latest_reused_apk_filename: ${{ matrix.slot == 'kernelsu-next_paired_latest' && (steps.adopt-apk.outputs.apk_filename)
         || '' }}
       kernelsu_stable_source_cache_key: ${{ matrix.slot == 'kernelsu_stable' && (steps.source-snapshot.outputs.source_cache_key)
         || '' }}
@@ -357,10 +613,10 @@ jobs:
         || '' }}
       kernelsu_stable_effective_ksu_branch: ${{ matrix.slot == 'kernelsu_stable' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      kernelsu_stable_apk_cache_key: ${{ matrix.slot == 'kernelsu_stable' && (steps.apk-cache-key.outputs.apk_cache_key) ||
-        '' }}
       kernelsu_stable_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      kernelsu_stable_apk_cache_key: ${{ matrix.slot == 'kernelsu_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kernelsu_stable_manager_adoption: ${{ matrix.slot == 'kernelsu_stable' && (steps.adopt-apk.outputs.manager_adoption)
         || '' }}
       kernelsu_stable_reused_manager_package: ${{ matrix.slot == 'kernelsu_stable' && (steps.adopt-apk.outputs.manager_package)
@@ -396,10 +652,10 @@ jobs:
         || '' }}
       kernelsu_latest_effective_ksu_branch: ${{ matrix.slot == 'kernelsu_latest' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      kernelsu_latest_apk_cache_key: ${{ matrix.slot == 'kernelsu_latest' && (steps.apk-cache-key.outputs.apk_cache_key) ||
-        '' }}
       kernelsu_latest_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      kernelsu_latest_apk_cache_key: ${{ matrix.slot == 'kernelsu_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kernelsu_latest_manager_adoption: ${{ matrix.slot == 'kernelsu_latest' && (steps.adopt-apk.outputs.manager_adoption)
         || '' }}
       kernelsu_latest_reused_manager_package: ${{ matrix.slot == 'kernelsu_latest' && (steps.adopt-apk.outputs.manager_package)
@@ -415,6 +671,94 @@ jobs:
       kernelsu_latest_reused_manager_version_code: ${{ matrix.slot == 'kernelsu_latest' && (steps.adopt-apk.outputs.manager_version_code)
         || '' }}
       kernelsu_latest_reused_apk_filename: ${{ matrix.slot == 'kernelsu_latest' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      kernelsu_paired_stable_source_cache_key: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      kernelsu_paired_stable_source_identity: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      kernelsu_paired_stable_native_source_version: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      kernelsu_paired_stable_ddk_matrix: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.lkm-matrix.outputs.matrix)
+        || '' }}
+      kernelsu_paired_stable_manager_package: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.certificate.outputs.package)
+        || '' }}
+      kernelsu_paired_stable_manager_cert_size: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      kernelsu_paired_stable_manager_cert_sha256: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      kernelsu_paired_stable_ksu_ref: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.sources.outputs.ksu_ref) || ''
+        }}
+      kernelsu_paired_stable_ksu_repo: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.sources.outputs.ksu_repo) ||
+        '' }}
+      kernelsu_paired_stable_ksu_short: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.sources.outputs.ksu_short) ||
+        '' }}
+      kernelsu_paired_stable_ksu_source_branch: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      kernelsu_paired_stable_effective_ksu_branch: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      kernelsu_paired_stable_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      kernelsu_paired_stable_apk_cache_key: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      kernelsu_paired_stable_manager_adoption: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      kernelsu_paired_stable_reused_manager_package: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      kernelsu_paired_stable_reused_manager_cert_size: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      kernelsu_paired_stable_reused_manager_cert_sha256: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      kernelsu_paired_stable_reused_apk_sha256: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      kernelsu_paired_stable_reused_manager_version_name: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      kernelsu_paired_stable_reused_manager_version_code: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      kernelsu_paired_stable_reused_apk_filename: ${{ matrix.slot == 'kernelsu_paired_stable' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      kernelsu_paired_latest_source_cache_key: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      kernelsu_paired_latest_source_identity: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      kernelsu_paired_latest_native_source_version: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      kernelsu_paired_latest_ddk_matrix: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.lkm-matrix.outputs.matrix)
+        || '' }}
+      kernelsu_paired_latest_manager_package: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.certificate.outputs.package)
+        || '' }}
+      kernelsu_paired_latest_manager_cert_size: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      kernelsu_paired_latest_manager_cert_sha256: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      kernelsu_paired_latest_ksu_ref: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.sources.outputs.ksu_ref) || ''
+        }}
+      kernelsu_paired_latest_ksu_repo: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.sources.outputs.ksu_repo) ||
+        '' }}
+      kernelsu_paired_latest_ksu_short: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.sources.outputs.ksu_short) ||
+        '' }}
+      kernelsu_paired_latest_ksu_source_branch: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      kernelsu_paired_latest_effective_ksu_branch: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      kernelsu_paired_latest_manager_recipe_sha256: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      kernelsu_paired_latest_apk_cache_key: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      kernelsu_paired_latest_manager_adoption: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      kernelsu_paired_latest_reused_manager_package: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      kernelsu_paired_latest_reused_manager_cert_size: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      kernelsu_paired_latest_reused_manager_cert_sha256: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      kernelsu_paired_latest_reused_apk_sha256: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      kernelsu_paired_latest_reused_manager_version_name: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      kernelsu_paired_latest_reused_manager_version_code: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      kernelsu_paired_latest_reused_apk_filename: ${{ matrix.slot == 'kernelsu_paired_latest' && (steps.adopt-apk.outputs.apk_filename)
         || '' }}
       kowsu_stable_source_cache_key: ${{ matrix.slot == 'kowsu_stable' && (steps.source-snapshot.outputs.source_cache_key)
         || '' }}
@@ -434,9 +778,10 @@ jobs:
         }}
       kowsu_stable_effective_ksu_branch: ${{ matrix.slot == 'kowsu_stable' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      kowsu_stable_apk_cache_key: ${{ matrix.slot == 'kowsu_stable' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kowsu_stable_manager_recipe_sha256: ${{ matrix.slot == 'kowsu_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      kowsu_stable_apk_cache_key: ${{ matrix.slot == 'kowsu_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kowsu_stable_manager_adoption: ${{ matrix.slot == 'kowsu_stable' && (steps.adopt-apk.outputs.manager_adoption) || ''
         }}
       kowsu_stable_reused_manager_package: ${{ matrix.slot == 'kowsu_stable' && (steps.adopt-apk.outputs.manager_package)
@@ -470,9 +815,10 @@ jobs:
         }}
       kowsu_latest_effective_ksu_branch: ${{ matrix.slot == 'kowsu_latest' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      kowsu_latest_apk_cache_key: ${{ matrix.slot == 'kowsu_latest' && (steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kowsu_latest_manager_recipe_sha256: ${{ matrix.slot == 'kowsu_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      kowsu_latest_apk_cache_key: ${{ matrix.slot == 'kowsu_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       kowsu_latest_manager_adoption: ${{ matrix.slot == 'kowsu_latest' && (steps.adopt-apk.outputs.manager_adoption) || ''
         }}
       kowsu_latest_reused_manager_package: ${{ matrix.slot == 'kowsu_latest' && (steps.adopt-apk.outputs.manager_package)
@@ -488,6 +834,88 @@ jobs:
         || '' }}
       kowsu_latest_reused_apk_filename: ${{ matrix.slot == 'kowsu_latest' && (steps.adopt-apk.outputs.apk_filename) || ''
         }}
+      kowsu_paired_stable_source_cache_key: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      kowsu_paired_stable_source_identity: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      kowsu_paired_stable_native_source_version: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      kowsu_paired_stable_ddk_matrix: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      kowsu_paired_stable_manager_package: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.certificate.outputs.package)
+        || '' }}
+      kowsu_paired_stable_manager_cert_size: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      kowsu_paired_stable_manager_cert_sha256: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      kowsu_paired_stable_ksu_ref: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.sources.outputs.ksu_ref) || '' }}
+      kowsu_paired_stable_ksu_repo: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.sources.outputs.ksu_repo) || '' }}
+      kowsu_paired_stable_ksu_short: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.sources.outputs.ksu_short) || '' }}
+      kowsu_paired_stable_ksu_source_branch: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      kowsu_paired_stable_effective_ksu_branch: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      kowsu_paired_stable_manager_recipe_sha256: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      kowsu_paired_stable_apk_cache_key: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      kowsu_paired_stable_manager_adoption: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      kowsu_paired_stable_reused_manager_package: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      kowsu_paired_stable_reused_manager_cert_size: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      kowsu_paired_stable_reused_manager_cert_sha256: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      kowsu_paired_stable_reused_apk_sha256: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      kowsu_paired_stable_reused_manager_version_name: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      kowsu_paired_stable_reused_manager_version_code: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      kowsu_paired_stable_reused_apk_filename: ${{ matrix.slot == 'kowsu_paired_stable' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      kowsu_paired_latest_source_cache_key: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      kowsu_paired_latest_source_identity: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      kowsu_paired_latest_native_source_version: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      kowsu_paired_latest_ddk_matrix: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      kowsu_paired_latest_manager_package: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.certificate.outputs.package)
+        || '' }}
+      kowsu_paired_latest_manager_cert_size: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      kowsu_paired_latest_manager_cert_sha256: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      kowsu_paired_latest_ksu_ref: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.sources.outputs.ksu_ref) || '' }}
+      kowsu_paired_latest_ksu_repo: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.sources.outputs.ksu_repo) || '' }}
+      kowsu_paired_latest_ksu_short: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.sources.outputs.ksu_short) || '' }}
+      kowsu_paired_latest_ksu_source_branch: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      kowsu_paired_latest_effective_ksu_branch: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      kowsu_paired_latest_manager_recipe_sha256: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      kowsu_paired_latest_apk_cache_key: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      kowsu_paired_latest_manager_adoption: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      kowsu_paired_latest_reused_manager_package: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      kowsu_paired_latest_reused_manager_cert_size: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      kowsu_paired_latest_reused_manager_cert_sha256: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      kowsu_paired_latest_reused_apk_sha256: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      kowsu_paired_latest_reused_manager_version_name: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      kowsu_paired_latest_reused_manager_version_code: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      kowsu_paired_latest_reused_apk_filename: ${{ matrix.slot == 'kowsu_paired_latest' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
       finasu_stable_source_cache_key: ${{ matrix.slot == 'finasu_stable' && (steps.source-snapshot.outputs.source_cache_key)
         || '' }}
       finasu_stable_source_identity: ${{ matrix.slot == 'finasu_stable' && (steps.source-identity.outputs.source_identity)
@@ -506,10 +934,10 @@ jobs:
         '' }}
       finasu_stable_effective_ksu_branch: ${{ matrix.slot == 'finasu_stable' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      finasu_stable_apk_cache_key: ${{ matrix.slot == 'finasu_stable' && (steps.apk-cache-key.outputs.apk_cache_key) || ''
-        }}
       finasu_stable_manager_recipe_sha256: ${{ matrix.slot == 'finasu_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      finasu_stable_apk_cache_key: ${{ matrix.slot == 'finasu_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       finasu_stable_manager_adoption: ${{ matrix.slot == 'finasu_stable' && (steps.adopt-apk.outputs.manager_adoption) ||
         '' }}
       finasu_stable_reused_manager_package: ${{ matrix.slot == 'finasu_stable' && (steps.adopt-apk.outputs.manager_package)
@@ -543,10 +971,10 @@ jobs:
         '' }}
       finasu_latest_effective_ksu_branch: ${{ matrix.slot == 'finasu_latest' && (steps.sources.outputs.effective_ksu_branch)
         || '' }}
-      finasu_latest_apk_cache_key: ${{ matrix.slot == 'finasu_latest' && (steps.apk-cache-key.outputs.apk_cache_key) || ''
-        }}
       finasu_latest_manager_recipe_sha256: ${{ matrix.slot == 'finasu_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
         || '' }}
+      finasu_latest_apk_cache_key: ${{ matrix.slot == 'finasu_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
       finasu_latest_manager_adoption: ${{ matrix.slot == 'finasu_latest' && (steps.adopt-apk.outputs.manager_adoption) ||
         '' }}
       finasu_latest_reused_manager_package: ${{ matrix.slot == 'finasu_latest' && (steps.adopt-apk.outputs.manager_package)
@@ -562,6 +990,90 @@ jobs:
         || '' }}
       finasu_latest_reused_apk_filename: ${{ matrix.slot == 'finasu_latest' && (steps.adopt-apk.outputs.apk_filename) || ''
         }}
+      finasu_paired_stable_source_cache_key: ${{ matrix.slot == 'finasu_paired_stable' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      finasu_paired_stable_source_identity: ${{ matrix.slot == 'finasu_paired_stable' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      finasu_paired_stable_native_source_version: ${{ matrix.slot == 'finasu_paired_stable' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      finasu_paired_stable_ddk_matrix: ${{ matrix.slot == 'finasu_paired_stable' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      finasu_paired_stable_manager_package: ${{ matrix.slot == 'finasu_paired_stable' && (steps.certificate.outputs.package)
+        || '' }}
+      finasu_paired_stable_manager_cert_size: ${{ matrix.slot == 'finasu_paired_stable' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      finasu_paired_stable_manager_cert_sha256: ${{ matrix.slot == 'finasu_paired_stable' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      finasu_paired_stable_ksu_ref: ${{ matrix.slot == 'finasu_paired_stable' && (steps.sources.outputs.ksu_ref) || '' }}
+      finasu_paired_stable_ksu_repo: ${{ matrix.slot == 'finasu_paired_stable' && (steps.sources.outputs.ksu_repo) || '' }}
+      finasu_paired_stable_ksu_short: ${{ matrix.slot == 'finasu_paired_stable' && (steps.sources.outputs.ksu_short) || ''
+        }}
+      finasu_paired_stable_ksu_source_branch: ${{ matrix.slot == 'finasu_paired_stable' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      finasu_paired_stable_effective_ksu_branch: ${{ matrix.slot == 'finasu_paired_stable' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      finasu_paired_stable_manager_recipe_sha256: ${{ matrix.slot == 'finasu_paired_stable' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      finasu_paired_stable_apk_cache_key: ${{ matrix.slot == 'finasu_paired_stable' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      finasu_paired_stable_manager_adoption: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      finasu_paired_stable_reused_manager_package: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      finasu_paired_stable_reused_manager_cert_size: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      finasu_paired_stable_reused_manager_cert_sha256: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      finasu_paired_stable_reused_apk_sha256: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      finasu_paired_stable_reused_manager_version_name: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      finasu_paired_stable_reused_manager_version_code: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      finasu_paired_stable_reused_apk_filename: ${{ matrix.slot == 'finasu_paired_stable' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
+      finasu_paired_latest_source_cache_key: ${{ matrix.slot == 'finasu_paired_latest' && (steps.source-snapshot.outputs.source_cache_key)
+        || '' }}
+      finasu_paired_latest_source_identity: ${{ matrix.slot == 'finasu_paired_latest' && (steps.source-identity.outputs.source_identity)
+        || '' }}
+      finasu_paired_latest_native_source_version: ${{ matrix.slot == 'finasu_paired_latest' && (steps.source-identity.outputs.native_source_version)
+        || '' }}
+      finasu_paired_latest_ddk_matrix: ${{ matrix.slot == 'finasu_paired_latest' && (steps.lkm-matrix.outputs.matrix) || ''
+        }}
+      finasu_paired_latest_manager_package: ${{ matrix.slot == 'finasu_paired_latest' && (steps.certificate.outputs.package)
+        || '' }}
+      finasu_paired_latest_manager_cert_size: ${{ matrix.slot == 'finasu_paired_latest' && (steps.certificate.outputs.cert_size)
+        || '' }}
+      finasu_paired_latest_manager_cert_sha256: ${{ matrix.slot == 'finasu_paired_latest' && (steps.certificate.outputs.cert_sha256)
+        || '' }}
+      finasu_paired_latest_ksu_ref: ${{ matrix.slot == 'finasu_paired_latest' && (steps.sources.outputs.ksu_ref) || '' }}
+      finasu_paired_latest_ksu_repo: ${{ matrix.slot == 'finasu_paired_latest' && (steps.sources.outputs.ksu_repo) || '' }}
+      finasu_paired_latest_ksu_short: ${{ matrix.slot == 'finasu_paired_latest' && (steps.sources.outputs.ksu_short) || ''
+        }}
+      finasu_paired_latest_ksu_source_branch: ${{ matrix.slot == 'finasu_paired_latest' && (steps.sources.outputs.ksu_source_branch)
+        || '' }}
+      finasu_paired_latest_effective_ksu_branch: ${{ matrix.slot == 'finasu_paired_latest' && (steps.sources.outputs.effective_ksu_branch)
+        || '' }}
+      finasu_paired_latest_manager_recipe_sha256: ${{ matrix.slot == 'finasu_paired_latest' && (steps.apk-cache-key.outputs.manager_recipe_sha256)
+        || '' }}
+      finasu_paired_latest_apk_cache_key: ${{ matrix.slot == 'finasu_paired_latest' && (steps.apk-cache-key.outputs.apk_version_cache_key
+        || steps.apk-cache-key.outputs.apk_cache_key) || '' }}
+      finasu_paired_latest_manager_adoption: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.manager_adoption)
+        || '' }}
+      finasu_paired_latest_reused_manager_package: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.manager_package)
+        || '' }}
+      finasu_paired_latest_reused_manager_cert_size: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_size)
+        || '' }}
+      finasu_paired_latest_reused_manager_cert_sha256: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.manager_cert_sha256)
+        || '' }}
+      finasu_paired_latest_reused_apk_sha256: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.apk_sha256)
+        || '' }}
+      finasu_paired_latest_reused_manager_version_name: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.manager_version_name)
+        || '' }}
+      finasu_paired_latest_reused_manager_version_code: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.manager_version_code)
+        || '' }}
+      finasu_paired_latest_reused_apk_filename: ${{ matrix.slot == 'finasu_paired_latest' && (steps.adopt-apk.outputs.apk_filename)
+        || '' }}
     steps:
     - name: 检出 gki
       uses: actions/checkout@v6
@@ -684,7 +1196,7 @@ jobs:
             output.write('source_identity='+json.dumps(identity,separators=(',',':'))+'\n')
             output.write('native_source_version='+native_version+'\n')
         PY
-    - name: 确定配套 APK 的复用条件
+    - name: 按管理器版本定位已编译 APK
       id: apk-cache-key
       if: ((matrix.variant == 'SukiSU' || matrix.variant == 'BakaSU') || (matrix.variant == 'KernelSU-Next' || matrix.variant
         == 'KernelSU' || matrix.variant == 'KowSU' || matrix.variant == 'FinaSU')) && (steps.sources.outputs.effective_ksu_branch
@@ -697,10 +1209,14 @@ jobs:
         MANAGER_CERT_SHA256: ${{ steps.certificate.outputs.cert_sha256 }}
         MANAGER_SOURCE_IDENTITY: ${{ steps.source-identity.outputs.source_identity }}
       run: |-
+        set -euo pipefail
         python3 tools/reusable_manager_apk.py key --variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \
           --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \
           --source-identity "$MANAGER_SOURCE_IDENTITY"
-    - name: 读取相同源码和签名的已编译 APK
+        python3 tools/restore_prebuilt_manager_apk.py --write-version-key --variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \
+          --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \
+          --source-identity "$MANAGER_SOURCE_IDENTITY" --source-dir ksu-snapshot-source
+    - name: 直接读取匹配版本的已编译 APK
       id: apk-cache
       uses: actions/cache/restore@v5
       if: steps.apk-cache-key.outputs.apk_cache_key != ''
@@ -708,8 +1224,11 @@ jobs:
       continue-on-error: true
       with:
         path: manager-apk-cache
-        key: ${{ format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_cache_key, github.run_id, github.run_attempt) }}
-        restore-keys: ${{ format('{0}-', steps.apk-cache-key.outputs.apk_cache_key) }}
+        key: ${{ format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key,
+          github.run_id, github.run_attempt) }}
+        restore-keys: |-
+          ${{ steps.apk-cache-key.outputs.apk_version_cache_key != '' && format('{0}-', steps.apk-cache-key.outputs.apk_version_cache_key) || '' }}
+          ${{ format('{0}-', steps.apk-cache-key.outputs.apk_cache_key) }}
     - name: 核验已编译 APK 并保留原始编译记录
       id: adopt-apk
       if: steps.apk-cache-key.outputs.apk_cache_key != ''
@@ -729,6 +1248,27 @@ jobs:
         python3 tools/restore_prebuilt_manager_apk.py --variant "$KSU_VARIANT" --channel "$KSU_BRANCH" --ksu-ref "$KSU_REF" \
           --cert-size "$MANAGER_CERT_SIZE" --cert-sha256 "$MANAGER_CERT_SHA256" \
           --source-identity "$MANAGER_SOURCE_IDENTITY" --cache-dir manager-apk-cache --output-dir manager-artifact --source-dir ksu-snapshot-source --branch "$DEFAULT_BRANCH"
+    - name: 整理已核验的 APK 以便下次按版本读取
+      if: steps.adopt-apk.outputs.manager_apk_reused == 'true' && steps.apk-cache-key.outputs.apk_version_cache_key != ''
+        && !startsWith(steps.apk-cache.outputs.cache-matched-key, format('{0}-', steps.apk-cache-key.outputs.apk_version_cache_key))
+      continue-on-error: true
+      env:
+        APK_FILENAME: ${{ steps.adopt-apk.outputs.apk_filename }}
+      run: |
+        set -euo pipefail
+        rm -rf -- manager-apk-cache
+        mkdir -p manager-apk-cache
+        cp -- "manager-artifact/$APK_FILENAME" manager-apk-cache/
+    - name: 保存已核验 APK 的版本缓存
+      uses: actions/cache/save@v5
+      if: steps.adopt-apk.outputs.manager_apk_reused == 'true' && steps.apk-cache-key.outputs.apk_version_cache_key != ''
+        && !startsWith(steps.apk-cache.outputs.cache-matched-key, format('{0}-', steps.apk-cache-key.outputs.apk_version_cache_key))
+      continue-on-error: true
+      timeout-minutes: 2
+      with:
+        path: manager-apk-cache
+        key: ${{ format('{0}-{1}-{2}', steps.apk-cache-key.outputs.apk_version_cache_key || steps.apk-cache-key.outputs.apk_cache_key,
+          github.run_id, github.run_attempt) }}
     - name: 保存本次不可变源码缓存
       uses: actions/cache/save@v5
       timeout-minutes: 3
@@ -757,25 +1297,124 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix: ${{ fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix) }}
-  prebuild-manager-native:
-    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 原生模块 / ${{ matrix.kmi }}
+  select-native-builds:
+    name: 安排未命中的 APK 构建
     needs:
     - check-upstream
     - prebuild-manager-sources
     if: '!cancelled() && needs.prebuild-manager-sources.result == ''success'' && ((contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''sukisu_stable'') && needs.prebuild-manager-sources.outputs[''sukisu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''sukisu_latest'') && needs.prebuild-manager-sources.outputs[''sukisu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''sukisu_paired_stable'') && needs.prebuild-manager-sources.outputs[''sukisu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''sukisu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''sukisu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''bakasu_stable'') && needs.prebuild-manager-sources.outputs[''bakasu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''bakasu_latest'') && needs.prebuild-manager-sources.outputs[''bakasu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''bakasu_paired_stable'') && needs.prebuild-manager-sources.outputs[''bakasu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''bakasu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''bakasu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''kernelsu-next_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu-next_stable_manager_adoption''] == '''')
       || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kernelsu-next_latest'')
       && needs.prebuild-manager-sources.outputs[''kernelsu-next_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu-next_paired_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu-next_paired_stable_manager_adoption'']
+      == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kernelsu-next_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''kernelsu-next_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''kernelsu_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''kernelsu_latest'') && needs.prebuild-manager-sources.outputs[''kernelsu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu_paired_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu_paired_stable_manager_adoption''] ==
+      '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kernelsu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''kernelsu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''kowsu_stable'') && needs.prebuild-manager-sources.outputs[''kowsu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''kowsu_latest'') && needs.prebuild-manager-sources.outputs[''kowsu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kowsu_paired_stable'') && needs.prebuild-manager-sources.outputs[''kowsu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kowsu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''kowsu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
       ''finasu_stable'') && needs.prebuild-manager-sources.outputs[''finasu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
-      ''finasu_latest'') && needs.prebuild-manager-sources.outputs[''finasu_latest_manager_adoption''] == ''''))'
+      ''finasu_latest'') && needs.prebuild-manager-sources.outputs[''finasu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''finasu_paired_stable'') && needs.prebuild-manager-sources.outputs[''finasu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''finasu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''finasu_paired_latest_manager_adoption''] == ''''))'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      native_matrix: ${{ steps.layout.outputs.native_matrix }}
+      native_count: ${{ steps.layout.outputs.native_count }}
+    steps:
+    - name: 检出构建工具
+      uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - name: 只展开缺少配套 APK 的原生目标
+      id: layout
+      env:
+        NATIVE_MATRIX: ${{ needs.check-upstream.outputs.manager_prebuild_lkm_matrix }}
+        ADOPTED: ${{ needs.prebuild-manager-sources.outputs['sukisu_stable_manager_adoption'] != '' && 'sukisu_stable' ||
+          '' }} ${{ needs.prebuild-manager-sources.outputs['sukisu_latest_manager_adoption'] != '' && 'sukisu_latest' || ''
+          }} ${{ needs.prebuild-manager-sources.outputs['sukisu_paired_stable_manager_adoption'] != '' && 'sukisu_paired_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['sukisu_paired_latest_manager_adoption'] != '' && 'sukisu_paired_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['bakasu_stable_manager_adoption'] != '' && 'bakasu_stable' ||
+          '' }} ${{ needs.prebuild-manager-sources.outputs['bakasu_latest_manager_adoption'] != '' && 'bakasu_latest' || ''
+          }} ${{ needs.prebuild-manager-sources.outputs['bakasu_paired_stable_manager_adoption'] != '' && 'bakasu_paired_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['bakasu_paired_latest_manager_adoption'] != '' && 'bakasu_paired_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu-next_stable_manager_adoption'] != '' && 'kernelsu-next_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu-next_latest_manager_adoption'] != '' && 'kernelsu-next_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu-next_paired_stable_manager_adoption'] != '' && 'kernelsu-next_paired_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu-next_paired_latest_manager_adoption'] != '' && 'kernelsu-next_paired_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu_stable_manager_adoption'] != '' && 'kernelsu_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu_latest_manager_adoption'] != '' && 'kernelsu_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu_paired_stable_manager_adoption'] != '' && 'kernelsu_paired_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kernelsu_paired_latest_manager_adoption'] != '' && 'kernelsu_paired_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kowsu_stable_manager_adoption'] != '' && 'kowsu_stable' ||
+          '' }} ${{ needs.prebuild-manager-sources.outputs['kowsu_latest_manager_adoption'] != '' && 'kowsu_latest' || ''
+          }} ${{ needs.prebuild-manager-sources.outputs['kowsu_paired_stable_manager_adoption'] != '' && 'kowsu_paired_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['kowsu_paired_latest_manager_adoption'] != '' && 'kowsu_paired_latest'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['finasu_stable_manager_adoption'] != '' && 'finasu_stable' ||
+          '' }} ${{ needs.prebuild-manager-sources.outputs['finasu_latest_manager_adoption'] != '' && 'finasu_latest' || ''
+          }} ${{ needs.prebuild-manager-sources.outputs['finasu_paired_stable_manager_adoption'] != '' && 'finasu_paired_stable'
+          || '' }} ${{ needs.prebuild-manager-sources.outputs['finasu_paired_latest_manager_adoption'] != '' && 'finasu_paired_latest'
+          || '' }}
+      run: python3 tools/manager_matrix_layout.py --native-only slot
+  prebuild-manager-native:
+    name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} 原生模块 / ${{ matrix.kmi }}
+    needs:
+    - check-upstream
+    - prebuild-manager-sources
+    - select-native-builds
+    if: '!cancelled() && needs.prebuild-manager-sources.result == ''success'' && ((contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''sukisu_stable'') && needs.prebuild-manager-sources.outputs[''sukisu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''sukisu_latest'') && needs.prebuild-manager-sources.outputs[''sukisu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''sukisu_paired_stable'') && needs.prebuild-manager-sources.outputs[''sukisu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''sukisu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''sukisu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''bakasu_stable'') && needs.prebuild-manager-sources.outputs[''bakasu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''bakasu_latest'') && needs.prebuild-manager-sources.outputs[''bakasu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''bakasu_paired_stable'') && needs.prebuild-manager-sources.outputs[''bakasu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''bakasu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''bakasu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu-next_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu-next_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kernelsu-next_latest'')
+      && needs.prebuild-manager-sources.outputs[''kernelsu-next_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu-next_paired_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu-next_paired_stable_manager_adoption'']
+      == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kernelsu-next_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''kernelsu-next_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu_latest'') && needs.prebuild-manager-sources.outputs[''kernelsu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kernelsu_paired_stable'') && needs.prebuild-manager-sources.outputs[''kernelsu_paired_stable_manager_adoption''] ==
+      '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kernelsu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''kernelsu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kowsu_stable'') && needs.prebuild-manager-sources.outputs[''kowsu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kowsu_latest'') && needs.prebuild-manager-sources.outputs[''kowsu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''kowsu_paired_stable'') && needs.prebuild-manager-sources.outputs[''kowsu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''kowsu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''kowsu_paired_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''finasu_stable'') && needs.prebuild-manager-sources.outputs[''finasu_stable_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''finasu_latest'') && needs.prebuild-manager-sources.outputs[''finasu_latest_manager_adoption''] == '''') || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot,
+      ''finasu_paired_stable'') && needs.prebuild-manager-sources.outputs[''finasu_paired_stable_manager_adoption''] == '''')
+      || (contains(fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix).include.*.slot, ''finasu_paired_latest'')
+      && needs.prebuild-manager-sources.outputs[''finasu_paired_latest_manager_adoption''] == '''')) && needs.select-native-builds.result
+      == ''success'' && needs.select-native-builds.outputs.native_count != ''0'''
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -794,7 +1433,7 @@ jobs:
     strategy:
       fail-fast: false
       max-parallel: 24
-      matrix: ${{ fromJSON(needs.check-upstream.outputs.manager_prebuild_lkm_matrix) }}
+      matrix: ${{ fromJSON(needs.select-native-builds.outputs.native_matrix) }}
     steps:
     - name: 检出构建工具
       uses: actions/checkout@v6
@@ -988,13 +1627,15 @@ jobs:
   prebuild-manager-apks:
     name: ${{ (matrix.variant == 'SukiSU' && 'SukiSU-Nova' || matrix.variant) }} · ${{ matrix.channels }} · 预编译管理器 APK
     if: always() && !cancelled() && needs.prebuild-manager-sources.result == 'success' && (needs.prebuild-manager-native.result
-      == 'success' || needs.prebuild-manager-native.result == 'skipped')
+      == 'success' || needs.prebuild-manager-native.result == 'skipped') && (needs.select-native-builds.result == 'success'
+      || needs.select-native-builds.result == 'skipped')
     env:
       KSU_VARIANT: ${{ matrix.variant }}
     needs:
     - check-upstream
     - prebuild-manager-sources
     - prebuild-manager-native
+    - select-native-builds
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -1577,7 +2218,7 @@ jobs:
         key: ${{ steps.manager-cargo-cache.outputs.cache-primary-key }}
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: 24
       matrix: ${{ fromJSON(needs.check-upstream.outputs.manager_prebuild_matrix) }}
   record-manager-prebuild:
     name: 记录已验证的官方版本状态
