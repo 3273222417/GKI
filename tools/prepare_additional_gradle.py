@@ -5,6 +5,23 @@ import re
 from manager_variants import ADDITIONAL_MANAGERS, manager_profile
 
 
+def next_plugin_repositories(text: str) -> str:
+    """Keep Next's repositories and add the official plugin marker fallback."""
+    blocks = list(re.finditer(r'(?m)^pluginManagement[ \t]*\{\n[ \t]+repositories[ \t]*\{\n'
+                              r'(?P<repositories>[^{}]*)^[ \t]+\}\n\}', text))
+    if len(blocks) != 1:
+        raise ValueError('Review changed upstream plugin repository configuration')
+    block = blocks[0]
+    repositories = block['repositories']
+    if re.search(r'(?m)^[ \t]*gradlePluginPortal\(\)[ \t]*$', repositories):
+        return text
+    central = list(re.finditer(r'(?m)^([ \t]*)mavenCentral\(\)[ \t]*$', repositories))
+    if len(central) != 1:
+        raise ValueError('Expected one official Maven Central plugin repository')
+    position = block.start('repositories') + central[0].end()
+    return text[:position] + '\n' + central[0][1] + 'gradlePluginPortal()' + text[position:]
+
+
 def prepare(source: Path, variant: str):
     if variant not in ADDITIONAL_MANAGERS:
         raise ValueError('Expected one additional source-built manager')
@@ -24,7 +41,13 @@ def prepare(source: Path, variant: str):
         raise ValueError('Expected one native release build type')
     package = manager_profile(variant)['package']
     text += '\nandroid { defaultConfig { applicationId = "' + package + '" } }\n'
+    if variant == 'KernelSU-Next':
+        settings = source / 'manager/settings.gradle.kts'
+        original_settings = settings.read_text(encoding='utf-8')
+        updated_settings = next_plugin_repositories(original_settings)
     app.write_text(text, encoding='utf-8')
+    if variant == 'KernelSU-Next' and updated_settings != original_settings:
+        settings.write_text(updated_settings, encoding='utf-8')
 
 
 if __name__ == '__main__':
