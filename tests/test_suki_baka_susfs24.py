@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import sys
 import unittest
 import uuid
@@ -132,6 +133,78 @@ void fallback(void) {
         self.assertFalse(_matches_reviewed_dispatch(self.root, reviewed + b'/* other change */\n', native))
         self.assertFalse(_matches_reviewed_dispatch(self.root, reviewed.replace(b'susfs_set_priority_uid_filter(arg);',
                                                                                  b'unreviewed_call(arg);'), native))
+
+    def test_newer_bakasu_path_uid_case_tracks_the_header_api_and_source_receipt(self):
+        self.source('kernel/supercall/supercall.c', BAKA_GATE)
+        command = 'CMD_SUSFS_SET_SUS_PATH_UID_FILTER'
+        native_case = ('    case ' + command + ': {\n'
+                       '        susfs_set_sus_path_uid_filter(arg);\n'
+                       '        return 0;\n'
+                       '    }\n')
+        original = BAKA_DISPATCH.replace('    case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:',
+                                         native_case + '    case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:')
+        # Current upstream returns success for unknown commands. Keep that
+        # native behavior when the selected SUSFS dependency lacks this API.
+        original = original.replace('    return -EINVAL;\n', '    return 0;\n')
+        updated = compat.dispatch_with_priority(self.root, original, 'BakaSU')
+        guarded = '#ifdef ' + command + '\n' + native_case + '#endif // ' + command + '\n'
+        self.assertIn(guarded, updated)
+        self.assertEqual(1, updated.count('susfs_set_sus_path_uid_filter(arg);'))
+        self.assertEqual(updated, compat.dispatch_with_priority(self.root, updated, 'BakaSU'))
+        self.assertTrue(updated.endswith('    return 0;\n}\n#endif\n'))
+        self.assertTrue(_matches_reviewed_dispatch(self.root, updated.encode(), original.encode()))
+        self.assertFalse(_matches_reviewed_dispatch(self.root, updated.replace('return 0;', 'return -1;', 1).encode(),
+                                                     original.encode()))
+        for changed in (original.replace('susfs_set_sus_path_uid_filter(arg);', 'susfs_set_sus_path_uid_filter(other);'),
+                        original.replace(native_case, native_case + native_case)):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'optional native SUSFS path UID'):
+                compat.dispatch_with_priority(self.root, changed, 'BakaSU')
+
+    @unittest.skipUnless(shutil.which('cc'), 'C compiler required for command ABI verification')
+    def test_optional_path_uid_dispatch_compiles_with_present_and_absent_header_api(self):
+        self.source('kernel/supercall/supercall.c', BAKA_GATE)
+        case = ('    case CMD_SUSFS_SET_SUS_PATH_UID_FILTER: {\n'
+                '        susfs_set_sus_path_uid_filter(arg);\n        return 0;\n    }\n')
+        native = BAKA_DISPATCH.replace('    case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:',
+                                       case + '    case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:')
+        dispatch = compat.dispatch_with_priority(self.root, native, 'BakaSU')
+        harness = '''#include <errno.h>
+#define __user
+#define CONFIG_KSU_SUSFS 1
+#define CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER 1
+#define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 1
+#define CMD_SUSFS_SET_PRIORITY_UID_FILTER 3
+static int calls;
+void susfs_set_avc_log_spoofing(void **arg) { (void)arg; calls = 1; }
+void susfs_set_priority_uid_filter(void **arg) { (void)arg; calls = 3; }
+#ifdef TEST_NEW_HEADER
+#define CMD_SUSFS_SET_SUS_PATH_UID_FILTER 2
+void susfs_set_sus_path_uid_filter(void **arg) { (void)arg; calls = 2; }
+#endif
+''' + dispatch + '''
+int main(void) {
+    void *argument = 0;
+    if (ksu_handle_susfs_cmd(1, &argument) != 0 || calls != 1) return 1;
+    if (ksu_handle_susfs_cmd(3, &argument) != 0 || calls != 3) return 2;
+    calls = 0;
+    int result = ksu_handle_susfs_cmd(2, &argument);
+#ifdef TEST_NEW_HEADER
+    return result != 0 || calls != 2;
+#else
+    return result != -EINVAL || calls != 0;
+#endif
+}
+'''
+        source = self.source('dispatch-test.c', harness)
+        for new_header in (False, True):
+            with self.subTest(new_header=new_header):
+                output = self.root / ('new-header.exe' if new_header else 'fixed-header.exe')
+                flags = ['-DTEST_NEW_HEADER=1'] if new_header else []
+                compiled = subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', *flags, str(source),
+                                           '-o', str(output)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(0, compiled.returncode, compiled.stdout + compiled.stderr)
+                executed = subprocess.run([str(output)], capture_output=True, timeout=5)
+                self.assertEqual(0, executed.returncode)
 
     def test_native_preinit_option_requires_real_providers_and_their_link_rule(self):
         preinit = self.source('kernel/preinit/preinit.c', PREINIT)

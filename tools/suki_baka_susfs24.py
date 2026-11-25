@@ -90,6 +90,8 @@ def validate_dependency(dependency: Path) -> None:
 
 
 def dispatch_with_priority(source: Path, text: str, variant: str) -> str:
+    if variant == 'BakaSU':
+        text = guard_optional_sus_path_command(text)
     code = strip_comments_and_literals(text)
     avc = re.compile(r'(?m)^([ \t]+)case CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING:[ \t]*\{?[ \t]*\n'
                      r'([ \t]+)susfs_set_avc_log_spoofing\(arg\);')
@@ -126,6 +128,32 @@ def dispatch_with_priority(source: Path, text: str, variant: str) -> str:
             return text
         raise ValueError('Review the existing SUSFS priority UID command route')
     return text[:anchor.start()] + addition + text[anchor.start():]
+
+
+def guard_optional_sus_path_command(text: str) -> str:
+    """Compile the newer native command only when the SUSFS header exposes it."""
+    command = 'CMD_SUSFS_SET_SUS_PATH_UID_FILTER'
+    setter = 'susfs_set_sus_path_uid_filter'
+    code = strip_comments_and_literals(text)
+    references = len(re.findall(r'\b(?:' + command + '|' + setter + r')\b', code))
+    if not references:
+        return text
+    pattern = re.compile(r'(?m)^([ \t]+)case ' + command + r': \{\n'
+                         r'\1[ \t]+' + setter + r'\(arg\);\n'
+                         r'\1[ \t]+return 0;\n\1\}\n')
+    matches = list(pattern.finditer(text))
+    if len(matches) != 1:
+        raise ValueError('Review the optional native SUSFS path UID command')
+    match = matches[0]
+    opening = '#ifdef ' + command + '\n'
+    closing = '#endif // ' + command + '\n'
+    if references != 2:
+        raise ValueError('Review the optional native SUSFS path UID command guard')
+    if text[:match.start()].endswith(opening):
+        if not text[match.end():].startswith(closing):
+            raise ValueError('Review the optional native SUSFS path UID command guard')
+        return text
+    return text[:match.start()] + opening + match[0] + closing + text[match.end():]
 
 
 def in_switch(before: str) -> bool:
