@@ -51,6 +51,7 @@ CORE_INIT = 'kernel/core/init.c'
 DISPATCH = 'kernel/supercall/dispatch.c'
 HIDE = 'kernel/feature/selinux_hide.c'
 OBSERVER = 'kernel/manager/pkg_observer.c'
+TRACKER = 'kernel/manager/throne_tracker.c'
 KCONFIG = 'kernel/Kconfig'
 POLICY = 'kernel/selinux/sepolicy.c'
 RUNTIME = 'kernel/runtime/ksud_integration.c'
@@ -154,6 +155,32 @@ def guard_optional_sus_path_command(text: str) -> str:
             raise ValueError('Review the optional native SUSFS path UID command guard')
         return text
     return text[:match.start()] + opening + match[0] + closing + text[match.end():]
+
+
+def guard_optional_sus_path_refresh(text: str) -> str:
+    """Use the same optional API for its command and package-tracker refresh."""
+    symbol = 'susfs_parse_sus_path_app_strings'
+    calls = len(re.findall(r'\b' + symbol + r'\s*\(', strip_comments_and_literals(text)))
+    if not calls:
+        return text
+    if calls != 1:
+        raise ValueError('Review the optional native SUSFS path UID refresh')
+    header = '#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n#include <linux/susfs.h>\n#endif\n'
+    complete_header = ('#if defined(CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER) || defined(CONFIG_KSU_SUSFS_SUS_PATH)\n'
+                       '#include <linux/susfs.h>\n#endif\n')
+    if text.count(header) == 1:
+        text = text.replace(header, complete_header, 1)
+    elif text.count(complete_header) != 1:
+        raise ValueError('Review the optional native SUSFS tracker header')
+    gate = '#if defined(CONFIG_KSU_SUSFS_SUS_PATH) && defined(CMD_SUSFS_SET_SUS_PATH_UID_FILTER)'
+    block = re.compile(r'(?m)^(?:#ifdef CONFIG_KSU_SUSFS_SUS_PATH|' + re.escape(gate) + r')\n'
+                       r'(?P<body>(?:[ \t]*//[^\n]*\n)*[ \t]*' + symbol + r'\(\);\n)'
+                       r'(?P<end>#endif[ \t]*(?://[^\n]*)?\n)')
+    matches = list(block.finditer(text))
+    if len(matches) != 1:
+        raise ValueError('Review the optional native SUSFS path UID refresh guard')
+    match = matches[0]
+    return text[:match.start()] + gate + '\n' + match['body'] + match['end'] + text[match.end():]
 
 
 def in_switch(before: str) -> bool:
@@ -387,6 +414,9 @@ def integrate(source: Path, dependency: Path, variant: str) -> tuple[Path, ...]:
         OBSERVER: observer_with_priority(original[OBSERVER], variant),
         POLICY: policy_hooks(original[POLICY], baka_layout=variant == 'BakaSU'),
     }
+    if variant == 'BakaSU' and ((source / TRACKER).exists() or (source / TRACKER).is_symlink()):
+        original[TRACKER] = read(source, TRACKER)
+        updated[TRACKER] = guard_optional_sus_path_refresh(original[TRACKER])
     if variant == 'SukiSU':
         # Nova keeps the reviewed LSM provider for its separate inode label hook.
         original[CORE_INIT] = read(source, CORE_INIT)

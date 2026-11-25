@@ -160,6 +160,41 @@ void fallback(void) {
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'optional native SUSFS path UID'):
                 compat.dispatch_with_priority(self.root, changed, 'BakaSU')
 
+    def test_optional_path_uid_refresh_and_header_share_the_command_capability(self):
+        original = '''#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+#include <linux/susfs.h>
+#endif
+void tracker(void) {
+    scan_packages();
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+    susfs_parse_priority_app_strings();
+#endif
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+    // Renew the sus path uid bitmap filter
+    susfs_parse_sus_path_app_strings();
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+}
+'''
+        updated = compat.guard_optional_sus_path_refresh(original)
+        self.assertIn('#if defined(CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER) || defined(CONFIG_KSU_SUSFS_SUS_PATH)\n'
+                      '#include <linux/susfs.h>\n#endif\n', updated)
+        self.assertIn('#if defined(CONFIG_KSU_SUSFS_SUS_PATH) && defined(CMD_SUSFS_SET_SUS_PATH_UID_FILTER)\n', updated)
+        self.assertIn('    scan_packages();\n#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n'
+                      '    susfs_parse_priority_app_strings();\n#endif\n', updated)
+        self.assertEqual(1, updated.count('susfs_parse_sus_path_app_strings();'))
+        self.assertEqual(updated, compat.guard_optional_sus_path_refresh(updated))
+        for changed in (original.replace('susfs_parse_sus_path_app_strings();',
+                                         'susfs_parse_sus_path_app_strings();\n    susfs_parse_sus_path_app_strings();'),
+                        original.replace('susfs_parse_sus_path_app_strings();', 'susfs_parse_sus_path_app_strings(unknown);'),
+                        original.replace('#ifdef CONFIG_KSU_SUSFS_SUS_PATH', '#ifdef OTHER')):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, 'optional native SUSFS'):
+                compat.guard_optional_sus_path_refresh(changed)
+
+    def test_older_tracker_without_the_optional_api_is_unchanged(self):
+        original = ('#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n#include <linux/susfs.h>\n#endif\n'
+                    'void tracker(void) { scan_packages(); }\n')
+        self.assertEqual(original, compat.guard_optional_sus_path_refresh(original))
+
     @unittest.skipUnless(shutil.which('cc'), 'C compiler required for command ABI verification')
     def test_optional_path_uid_dispatch_compiles_with_present_and_absent_header_api(self):
         self.source('kernel/supercall/supercall.c', BAKA_GATE)
@@ -205,6 +240,53 @@ int main(void) {
                 self.assertEqual(0, compiled.returncode, compiled.stdout + compiled.stderr)
                 executed = subprocess.run([str(output)], capture_output=True, timeout=5)
                 self.assertEqual(0, executed.returncode)
+
+    @unittest.skipUnless(shutil.which('cc'), 'C compiler required for tracker ABI verification')
+    def test_optional_path_refresh_compiles_links_and_keeps_native_scan(self):
+        tracker = '''#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+#include <linux/susfs.h>
+#endif
+void scan_done(void) {
+    native_scan();
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+    susfs_parse_sus_path_app_strings();
+#endif
+}
+'''
+        updated = compat.guard_optional_sus_path_refresh(tracker)
+        include = self.source('include/linux/susfs.h', '''#ifdef TEST_NEW_HEADER
+#define CMD_SUSFS_SET_SUS_PATH_UID_FILTER 2
+void susfs_parse_sus_path_app_strings(void);
+#endif
+''').parent.parent
+        source = self.source('tracker-test.c', '''static int scans, refreshes;
+void native_scan(void) { scans++; }
+#ifdef TEST_NEW_HEADER
+void susfs_parse_sus_path_app_strings(void) { refreshes++; }
+#endif
+''' + updated + '''
+int main(void) {
+    scan_done();
+    return scans != 1 || refreshes != EXPECTED_REFRESH;
+}
+''')
+        for priority in (False, True):
+            for path in (False, True):
+                for new_header in (False, True):
+                    with self.subTest(priority=priority, path=path, new_header=new_header):
+                        flags = ['-DEXPECTED_REFRESH=' + str(int(path and new_header))]
+                        for macro, enabled in (('CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER', priority),
+                                               ('CONFIG_KSU_SUSFS_SUS_PATH', path),
+                                               ('TEST_NEW_HEADER', new_header)):
+                            if enabled:
+                                flags.append('-D' + macro + '=1')
+                        output = self.root / 'tracker-test.exe'
+                        compiled = subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', *flags,
+                                                   '-I', str(include), str(source), '-o', str(output)],
+                                                  capture_output=True, text=True, timeout=30)
+                        self.assertEqual(0, compiled.returncode, compiled.stdout + compiled.stderr)
+                        executed = subprocess.run([str(output)], capture_output=True, timeout=5)
+                        self.assertEqual(0, executed.returncode)
 
     def test_native_preinit_option_requires_real_providers_and_their_link_rule(self):
         preinit = self.source('kernel/preinit/preinit.c', PREINIT)
